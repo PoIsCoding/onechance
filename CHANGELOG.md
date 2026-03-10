@@ -5,6 +5,41 @@ Format: [Semantische Versionierung](https://semver.org/lang/de/) `vMAJOR.MINOR.P
 
 ---
 
+## [v1.4.0] – 2025-XX-XX
+
+### Neu: Rollen
+- **Zuschauer**: Spieler können beim Beitreten "Zuschauer" wählen. Sie sehen in Echtzeit das Geheimwort und alle Eingaben. Sie zählen nicht zum Spielerlimit.
+- **Moderator**: Host kann einen Spieler als Moderator setzen. Moderatoren sehen alles wie Zuschauer, können aber nach der Clue-Phase manuell Hinweise streichen (Regelverstoß). Erst nach ihrer Bestätigung sehen Wortgeber die Animations-Phase.
+- **TV-Spieler**: Host markiert einen Spieler als TV-Spieler. Dieser rät immer (nie Wortgeber), sieht erst nach der Reveal-Animation die Hinweise und sitzt mit dem Rücken zum Fernseher. Richtig/Falsch wird durch Mod oder Host bestätigt.
+
+### Neu: Spielmechanik
+- **Moderator-Prüfungsphase** (`mod-review`): Wenn ein Moderator existiert, kommt nach der Clue-Phase ein eigener Screen für den Mod zum manuellen Streichen von Hinweisen.
+- **Automatische Weiterleitung** nach Reveal: Countdown-Ring (5 Sek.) ersetzt den "Weiter"-Button – kein Admin-Klick mehr nötig.
+- **Verdikt-System** (TV-Modus): Moderator (oder Host) sieht "✓ Richtig / ✗ Falsch" Buttons und entscheidet das Ergebnis manuell.
+- **Rater sieht Reveal NICHT mehr**: Rater und TV-Spieler bleiben auf dem Warte-Screen während die Durchstreich-Animation läuft.
+
+### Neu: Kategorien & Wortlisten
+- 4 Wortlisten als separate Dateien: `words-leicht.js`, `words-mittel.js`, `words-schwer.js`, `words-fsk18.js`
+- Kategorie-Auswahl per Chips auf Start-Screen und in der Lobby (Host kann ändern)
+- Kategorie wird in Firebase gespeichert und für alle Clients sichtbar
+
+### Neu: UI
+- **QR-Code** in Lobby wenn TV-Spieler gesetzt – schnelles Beitreten mit Smartphone
+- **Schieberegler** für Spieler-Limit (statt Dropdown)
+- **Responsivität**: Logo bricht nicht mehr aus dem Container; Geheimwort skaliert automatisch mit der Textlänge; Layout nutzt auf großen Screens (Desktop, TV) viel mehr Platz (Lobby zweispaltig)
+- Neuer Badge-Typ: `mod-badge` (lila), `tv-badge` (rot), überarbeitete Aktionsbuttons in Spielerliste
+- Kick-Rechte für Moderatoren ergänzt
+
+### Dateien
+```
+assets/words/words-leicht.js   ← neu
+assets/words/words-mittel.js   ← neu
+assets/words/words-schwer.js   ← neu
+assets/words/words-fsk18.js    ← neu
+```
+
+---
+
 ## [v1.3.0] – 2025-XX-XX
 
 ### Neu

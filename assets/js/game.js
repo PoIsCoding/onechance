@@ -1,125 +1,116 @@
 /**
  * ═══════════════════════════════════════════════════════════════
- *  One Chance – Multiplayer Ratespiel
- *  game.js – Spiellogik, Firebase-Verbindung, UI-Steuerung
+ *  One Chance – game.js v1.4.0
  *
- *  Architektur:
- *  - Firebase Realtime Database als Echtzeit-Backend
- *  - Lobby-System mit zufälligem 6-stelligen Code
- *  - Spielphasen: lobby → clue → reveal → guess → result
+ *  Rollen:
+ *    spieler   – normaler Spieler, gibt Hinweise, kann raten
+ *    zuschauer – sieht alles (Wort + Eingaben), zählt nicht zum Limit
+ *    moderator – wie Zuschauer + kann Hinweise streichen + Verdikt
+ *    tv        – TV-Spieler: rät immer, sieht nichts bis die Hints kommen
  *
- *  Neu in v1.3.0:
- *  - Host-Reconnect: UID liegt in localStorage (überlebt Reload).
- *    Beim Seitenaufruf wird geprüft ob noch eine Host-Lobby aktiv
- *    ist – falls ja, kehrt der Host automatisch zurück.
- *  - Spieler-Limit: Host kann max. Spieleranzahl (3–12) setzen.
- *    Beitrittsversuche über dem Limit werden blockiert.
- *  - Spieler kicken: Host sieht ✕-Button neben jedem Spieler.
- *    Gekickte Spieler werden zur kicked/-Liste hinzugefügt und
- *    sehen sofort den Start-Screen mit Hinweis.
- *  - Einlade-Link: Generiert URL mit ?lobby=CODE. WhatsApp-Teilen.
- *    Beim Öffnen wird der Code automatisch vorausgefüllt.
+ *  Spielphasen:
+ *    lobby → clue → mod-review (optional) → reveal → guess → result
  *
  *  Datenbankstruktur:
  *  /lobbies/{code}/
- *    ├── host:        string          (UID des Hosts)
- *    ├── phase:       string          (lobby|clue|reveal|guess|result)
- *    ├── maxPlayers:  number          (Spieler-Limit, default 8)
- *    ├── secretWord:  string
- *    ├── guesserUID:  string
- *    ├── guess:       string
- *    ├── kicked/
- *    │   └── {uid}: true             (gekickte UIDs)
- *    ├── players/
- *    │   └── {uid}: { name, ready }
- *    └── clues/
- *        └── {uid}: string
+ *    ├── host, phase, maxPlayers, category
+ *    ├── secretWord, guesserUID, guess, verdict
+ *    ├── modUID          – UID des Moderators (optional)
+ *    ├── tvUID           – UID des TV-Spielers (optional)
+ *    ├── modStrikes/     – { uid: true }  manuell vom Mod gestrichene Hinweise
+ *    ├── kicked/         – { uid: true }
+ *    ├── players/        – { uid: { name, role, ready } }
+ *    └── clues/          – { uid: string }
  *
  * ═══════════════════════════════════════════════════════════════
  */
 
-// ── Logger ────────────────────────────────────────────────────
-function log(message, data = null) {
+// ── Logger ─────────────────────────────────────────────────────
+function log(msg, data = null) {
   const ts = new Date().toLocaleTimeString('de-AT');
-  if (data !== null) {
-    console.log(`[OneChance ${ts}] ${message}`, data);
-  } else {
-    console.log(`[OneChance ${ts}] ${message}`);
-  }
+  data !== null
+    ? console.log(`[OneChance ${ts}] ${msg}`, data)
+    : console.log(`[OneChance ${ts}] ${msg}`);
+}
+log('game.js v1.4.0 geladen');
+
+// ══════════════════════════════════════════════════════════════
+//  WORTLISTEN nach Kategorie
+//  Die Arrays kommen aus den separaten words-*.js Dateien
+// ══════════════════════════════════════════════════════════════
+const WORD_LISTS = {
+  leicht: typeof WORDS_LEICHT !== 'undefined' ? WORDS_LEICHT : ['Strand','Wolke','Elefant'],
+  mittel: typeof WORDS_MITTEL !== 'undefined' ? WORDS_MITTEL : ['Nostalgie','Paradoxon'],
+  schwer: typeof WORDS_SCHWER !== 'undefined' ? WORDS_SCHWER : ['Epiphanie','Palimpsest'],
+  fsk18:  typeof WORDS_FSK18  !== 'undefined' ? WORDS_FSK18  : ['Flirt','Liebeskummer'],
+};
+
+function getRandomWord(category) {
+  const list = WORD_LISTS[category] || WORD_LISTS.leicht;
+  return list[Math.floor(Math.random() * list.length)];
 }
 
-log('Skript geladen – initialisiere Spielumgebung');
-
-// ── Wortliste ─────────────────────────────────────────────────
-const WORD_LIST = [
-  'Strand','Wolke','Gitarre','Drache','Elefant','Vulkan',
-  'Pyramide','Kompass','Tintenfisch','Laterne','Schiff',
-  'Kristall','Wüste','Bibliothek','Feuerwerk','Igel','Ballon',
-  'Leuchtturm','Ozean','Zauberer','Tornado','Brücke','Nostalgie',
-  'Safari','Pinguin','Mondschein','Kamin','Ninja','Wasserfall',
-  'Rucksack','Dschungel','Labyrinth','Schatzkarte','Geysir',
-  'Wetterfahne','Sternschnuppe','Fischmarkt','Kletterwand',
-  'Sandburg','Thermoskanne','Zeitkapsel','Sonnenuhr','Gondel',
-  'Wildnis','Kaleidoskop','Trampolin','Höhlenmalerei','Zirkus',
-  'Boomerang','Kolosseum','Mangrove','Eisberg','Karawane',
-];
-
-// ── Spielzustand ──────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════
+//  ZUSTAND
+// ══════════════════════════════════════════════════════════════
 const State = {
   uid:         null,
   name:        null,
+  role:        'spieler',   // spieler | zuschauer | moderator | tv
   lobbyCode:   null,
   isHost:      false,
+  isMod:       false,       // ist dieser User Moderator?
+  isTV:        false,       // ist dieser User TV-Spieler?
   isGuesser:   false,
+  isViewer:    false,       // Zuschauer (zählt nicht zum Limit)
   phase:       null,
   secretWord:  null,
   guesserUID:  null,
+  modUID:      null,
+  tvUID:       null,
   maxPlayers:  8,
+  category:    'leicht',
   players:     {},
   clues:       {},
+  modStrikes:  {},          // vom Mod manuell gestrichene Clue-UIDs
   db:          null,
   listeners:   [],
 };
 
-// ── DOM-Referenzen ────────────────────────────────────────────
+// ── DOM-Referenzen ─────────────────────────────────────────────
 const screens = {
   start:       document.getElementById('screen-start'),
   lobby:       document.getElementById('screen-lobby'),
   clue:        document.getElementById('screen-clue'),
   guesserWait: document.getElementById('screen-guesser-wait'),
+  modReview:   document.getElementById('screen-mod-review'),
   reveal:      document.getElementById('screen-reveal'),
   guess:       document.getElementById('screen-guess'),
+  tvWait:      document.getElementById('screen-tv-wait'),
+  observer:    document.getElementById('screen-observer'),
   result:      document.getElementById('screen-result'),
 };
 
 // ══════════════════════════════════════════════════════════════
-//  USER-ID & NAME (localStorage – überlebt Seiten-Reload)
+//  PERSISTENZ (localStorage)
 // ══════════════════════════════════════════════════════════════
-
 function getOrCreateUID() {
   let uid = localStorage.getItem('onechance_uid');
   if (!uid) {
     uid = 'u_' + Math.random().toString(36).slice(2, 11);
     localStorage.setItem('onechance_uid', uid);
-    log('Neue UID erstellt:', uid);
+    log('Neue UID:', uid);
   } else {
-    log('UID aus localStorage:', uid);
+    log('UID geladen:', uid);
   }
   return uid;
 }
-
-function loadSavedName() {
-  return localStorage.getItem('onechance_name') || '';
-}
-
-function saveName(name) {
-  localStorage.setItem('onechance_name', name);
-}
+function loadSavedName() { return localStorage.getItem('onechance_name') || ''; }
+function saveName(n)     { localStorage.setItem('onechance_name', n); }
 
 // ══════════════════════════════════════════════════════════════
-//  FIREBASE KONFIGURATION
+//  FIREBASE
 // ══════════════════════════════════════════════════════════════
-
 const FIREBASE_CONFIG = {
   apiKey:            "AIzaSyBwrDM4sBowMX5ozhllSZOmy0tItp0iFJM",
   authDomain:        "one-chance-63038.firebaseapp.com",
@@ -133,70 +124,43 @@ const FIREBASE_CONFIG = {
 
 function initFirebase() {
   try {
-    if (firebase.apps.length === 0) {
-      firebase.initializeApp(FIREBASE_CONFIG);
-      log('Firebase initialisiert');
-    }
+    if (firebase.apps.length === 0) firebase.initializeApp(FIREBASE_CONFIG);
     State.db = firebase.database();
-    log('Realtime Database verbunden');
+    log('Firebase verbunden');
     return true;
-  } catch (e) {
-    log('Firebase-Fehler:', e);
-    return false;
-  }
+  } catch (e) { log('Firebase-Fehler:', e); return false; }
 }
 
 // ══════════════════════════════════════════════════════════════
-//  SCREEN-MANAGER
+//  HILFSFUNKTIONEN
 // ══════════════════════════════════════════════════════════════
-
 function showScreen(name) {
   log('Screen:', name);
-  Object.entries(screens).forEach(([key, el]) => {
-    el.classList.toggle('active', key === name);
-  });
+  Object.entries(screens).forEach(([k, el]) => el.classList.toggle('active', k === name));
 }
 
-// ══════════════════════════════════════════════════════════════
-//  TOAST-BENACHRICHTIGUNG
-// ══════════════════════════════════════════════════════════════
-
-function showToast(message, duration = 3000) {
-  log('Toast:', message);
-  let toast = document.getElementById('oc-toast');
-  if (!toast) {
-    toast = document.createElement('div');
-    toast.id = 'oc-toast';
-    document.body.appendChild(toast);
-  }
-  toast.textContent = message;
-  toast.classList.add('show');
-  clearTimeout(toast._timer);
-  toast._timer = setTimeout(() => toast.classList.remove('show'), duration);
+function showToast(msg, duration = 3000) {
+  log('Toast:', msg);
+  let t = document.getElementById('oc-toast');
+  if (!t) { t = document.createElement('div'); t.id = 'oc-toast'; document.body.appendChild(t); }
+  t.textContent = msg;
+  t.classList.add('show');
+  clearTimeout(t._timer);
+  t._timer = setTimeout(() => t.classList.remove('show'), duration);
 }
-
-// ══════════════════════════════════════════════════════════════
-//  LOBBY-CODE GENERATOR
-// ══════════════════════════════════════════════════════════════
 
 function generateLobbyCode() {
-  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  const c = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   let code = '';
-  for (let i = 0; i < 6; i++) {
-    code += chars[Math.floor(Math.random() * chars.length)];
-  }
-  log('Code generiert:', code);
+  for (let i = 0; i < 6; i++) code += c[Math.floor(Math.random() * c.length)];
+  log('Code:', code);
   return code;
 }
 
-// ══════════════════════════════════════════════════════════════
-//  FIREBASE LISTENER MANAGEMENT
-// ══════════════════════════════════════════════════════════════
-
 function removeAllListeners() {
-  log(`${State.listeners.length} Listener entfernen`);
   State.listeners.forEach(({ ref, event, fn }) => ref.off(event, fn));
   State.listeners = [];
+  log('Alle Listener entfernt');
 }
 
 function addListener(ref, event, fn) {
@@ -204,278 +168,307 @@ function addListener(ref, event, fn) {
   State.listeners.push({ ref, event, fn });
 }
 
+// Slider-Fill (CSS-Variable für Gradient)
+function updateSliderFill(slider) {
+  const pct = ((slider.value - slider.min) / (slider.max - slider.min)) * 100;
+  slider.style.setProperty('--val', pct + '%');
+}
+
+// Kategorie-Label
+const CAT_LABELS = { leicht:'😊 Leicht', mittel:'🤔 Mittel', schwer:'🧠 Schwer', fsk18:'🔞 FSK18' };
+
 // ══════════════════════════════════════════════════════════════
-//  HOST-RECONNECT
-//  Beim Start prüfen ob der User noch eine aktive Host-Lobby hat.
-//  Der Lobby-Code wird in localStorage gespeichert wenn eine neue
-//  Lobby erstellt wird und beim Beenden wieder gelöscht.
+//  QR-CODE GENERIEREN
 // ══════════════════════════════════════════════════════════════
+function generateQR(code) {
+  const area = document.getElementById('qr-area');
+  const qrDiv = document.getElementById('qrcode');
+  if (!area || !qrDiv) return;
 
-async function checkHostReconnect(uid) {
-  log('Host-Reconnect-Prüfung für UID:', uid);
-
-  const savedCode = localStorage.getItem('onechance_lobby');
-  if (!savedCode) {
-    log('Kein gespeicherter Lobby-Code');
-    return false;
-  }
-
-  log('Gespeicherter Code:', savedCode);
+  const link = generateInviteLink(code);
+  qrDiv.innerHTML = '';
 
   try {
-    const snap = await State.db.ref(`lobbies/${savedCode}`).once('value');
-
-    if (!snap.exists()) {
-      log('Lobby existiert nicht mehr – bereinige localStorage');
-      localStorage.removeItem('onechance_lobby');
-      return false;
-    }
-
-    const data = snap.val();
-
-    if (data.host !== uid) {
-      log('User ist nicht (mehr) Host dieser Lobby');
-      localStorage.removeItem('onechance_lobby');
-      return false;
-    }
-
-    log('Reconnect erfolgreich! Lobby:', savedCode);
-
-    // Spieler-Eintrag erneuern (war evtl. beim Schließen gelöscht worden)
-    const savedName = loadSavedName() || 'Host';
-    await State.db.ref(`lobbies/${savedCode}/players/${uid}`).set({
-      name:  savedName,
-      ready: false,
+    new QRCode(qrDiv, {
+      text:   link,
+      width:  160,
+      height: 160,
+      colorDark:  '#e8eaf6',
+      colorLight: '#1e2235',
     });
-
-    State.lobbyCode  = savedCode;
-    State.isHost     = true;
-    State.name       = savedName;
-    State.maxPlayers = data.maxPlayers || 8;
-
-    showToast('🔄 Als Host wiederverbunden!');
-    enterLobbyScreen();
-    return true;
-
+    area.classList.remove('hidden');
+    log('QR-Code generiert für:', link);
   } catch (e) {
-    log('Reconnect-Fehler:', e);
-    return false;
+    log('QR-Fehler:', e);
   }
 }
 
 // ══════════════════════════════════════════════════════════════
 //  EINLADE-LINK
 // ══════════════════════════════════════════════════════════════
-
 function generateInviteLink(code) {
-  const base = window.location.href.split('?')[0].split('#')[0];
-  return `${base}?lobby=${code}`;
+  return window.location.href.split('?')[0].split('#')[0] + '?lobby=' + code;
 }
 
 function copyInviteLink() {
   const link = generateInviteLink(State.lobbyCode);
   navigator.clipboard.writeText(link).then(() => {
-    log('Einlade-Link kopiert:', link);
     showToast('🔗 Link kopiert!');
     const btn = document.getElementById('btn-invite-link');
     btn.textContent = '✓ Kopiert!';
     setTimeout(() => btn.textContent = '🔗 Link kopieren', 2000);
-  }).catch(() => {
-    // Fallback: Prompt öffnen
-    prompt('Link manuell kopieren:', link);
-  });
+  }).catch(() => prompt('Link:', link));
 }
 
 function shareWhatsApp() {
   const link = generateInviteLink(State.lobbyCode);
-  const text = encodeURIComponent(
-    `Komm in meine One Chance Lobby!\nCode: ${State.lobbyCode}\n${link}`
-  );
+  const text = encodeURIComponent(`Komm in meine One Chance Lobby!\nCode: ${State.lobbyCode}\n${link}`);
   window.open(`https://wa.me/?text=${text}`, '_blank');
-  log('WhatsApp-Teilen geöffnet');
 }
 
 // ══════════════════════════════════════════════════════════════
-//  SPIELER KICKEN (nur Host)
+//  HOST-RECONNECT
 // ══════════════════════════════════════════════════════════════
-
-async function kickPlayer(uid) {
-  const playerName = State.players[uid]?.name || 'Spieler';
-  log('Kick:', playerName, uid);
+async function checkHostReconnect(uid) {
+  const savedCode = localStorage.getItem('onechance_lobby');
+  if (!savedCode) return false;
+  log('Reconnect-Check für:', savedCode);
 
   try {
-    // 1. Kick-Eintrag setzen → Client erkennt dies und verlässt Lobby
-    await State.db.ref(`lobbies/${State.lobbyCode}/kicked/${uid}`).set(true);
-    // 2. Spieler aus Spielerliste entfernen
-    await State.db.ref(`lobbies/${State.lobbyCode}/players/${uid}`).remove();
+    const snap = await State.db.ref(`lobbies/${savedCode}`).once('value');
+    if (!snap.exists()) { localStorage.removeItem('onechance_lobby'); return false; }
+    const data = snap.val();
+    if (data.host !== uid) { localStorage.removeItem('onechance_lobby'); return false; }
 
-    log('Spieler gekickt:', playerName);
-    showToast(`🚫 ${playerName} wurde entfernt.`);
-  } catch (e) {
-    log('Kick-Fehler:', e);
-  }
-}
+    const savedName = loadSavedName() || 'Host';
+    await State.db.ref(`lobbies/${savedCode}/players/${uid}`).set({ name: savedName, role: 'spieler', ready: false });
 
-// ══════════════════════════════════════════════════════════════
-//  SPIELER-LIMIT SETZEN (nur Host)
-// ══════════════════════════════════════════════════════════════
+    State.lobbyCode  = savedCode;
+    State.isHost     = true;
+    State.name       = savedName;
+    State.maxPlayers = data.maxPlayers || 8;
+    State.category   = data.category   || 'leicht';
+    State.modUID     = data.modUID      || null;
+    State.tvUID      = data.tvUID       || null;
 
-async function updateMaxPlayers(newLimit) {
-  const limit = parseInt(newLimit, 10);
-  State.maxPlayers = limit;
-  log('Spieler-Limit:', limit);
-  await State.db.ref(`lobbies/${State.lobbyCode}/maxPlayers`).set(limit);
-  showToast(`👥 Limit: ${limit} Spieler`);
+    showToast('🔄 Als Host wiederverbunden!');
+    enterLobbyScreen();
+    return true;
+  } catch (e) { log('Reconnect-Fehler:', e); return false; }
 }
 
 // ══════════════════════════════════════════════════════════════
 //  LOBBY ERSTELLEN / BEITRETEN
 // ══════════════════════════════════════════════════════════════
-
-async function joinOrCreateLobby(name, code) {
-  log('joinOrCreateLobby – Name:', name, '| Code:', code || '(neu)');
+async function joinOrCreateLobby(name, code, role) {
+  log('joinOrCreate – Name:', name, 'Code:', code || '(neu)', 'Rolle:', role);
   const db = State.db;
 
   if (code) {
-    // ── Bestehendes Lobby beitreten ──
     const snap = await db.ref(`lobbies/${code}`).once('value');
-    if (!snap.exists()) throw new Error('Lobby nicht gefunden. Überprüfe den Code.');
-
+    if (!snap.exists()) throw new Error('Lobby nicht gefunden.');
     const data = snap.val();
     if (data.phase !== 'lobby') throw new Error('Das Spiel hat bereits begonnen.');
 
-    // Wurde dieser User gekickt?
     const kicked = data.kicked || {};
     if (kicked[State.uid]) throw new Error('Du wurdest aus dieser Lobby entfernt.');
 
-    // Spieler-Limit prüfen (Rejoin zählt nicht als neuer Slot)
-    const currentCount = Object.keys(data.players || {}).length;
-    const limit        = data.maxPlayers || 8;
-    const isRejoin     = !!(data.players && data.players[State.uid]);
-    if (!isRejoin && currentCount >= limit) {
-      throw new Error(`Die Lobby ist voll (max. ${limit} Spieler).`);
+    // Zuschauer zählen nicht zum Limit
+    if (role !== 'zuschauer') {
+      const playerEntries = Object.values(data.players || {});
+      const activeCount   = playerEntries.filter(p => p.role !== 'zuschauer').length;
+      const limit         = data.maxPlayers || 8;
+      const isRejoin      = !!(data.players && data.players[State.uid]);
+      if (!isRejoin && activeCount >= limit) {
+        throw new Error(`Die Lobby ist voll (max. ${limit} Spieler).`);
+      }
     }
 
-    await db.ref(`lobbies/${code}/players/${State.uid}`).set({ name, ready: false });
+    await db.ref(`lobbies/${code}/players/${State.uid}`).set({ name, role, ready: false });
 
     State.lobbyCode  = code;
     State.isHost     = (data.host === State.uid);
-    State.maxPlayers = limit;
-    log('Beigetreten:', code, '| isHost:', State.isHost);
+    State.maxPlayers = data.maxPlayers || 8;
+    State.category   = data.category   || 'leicht';
+    State.modUID     = data.modUID      || null;
+    State.tvUID      = data.tvUID       || null;
+    log('Lobby beigetreten:', code);
 
   } else {
-    // ── Neue Lobby erstellen ──
     const newCode = generateLobbyCode();
     await db.ref(`lobbies/${newCode}`).set({
       host:       State.uid,
       phase:      'lobby',
       maxPlayers: State.maxPlayers,
+      category:   State.category,
       secretWord: null,
       guesserUID: null,
       guess:      null,
+      verdict:    null,
+      modUID:     null,
+      tvUID:      null,
+      modStrikes: {},
       kicked:     {},
-      players:    { [State.uid]: { name, ready: false } },
+      players:    { [State.uid]: { name, role: 'spieler', ready: false } },
       clues:      {},
     });
-
     State.lobbyCode = newCode;
     State.isHost    = true;
-
-    // Lobby-Code für Host-Reconnect in localStorage speichern
     localStorage.setItem('onechance_lobby', newCode);
-    log('Neue Lobby erstellt:', newCode, '| Limit:', State.maxPlayers);
+    log('Neue Lobby:', newCode);
   }
 
   saveName(name);
+  State.role     = role;
+  State.isMod    = (State.uid === State.modUID);
+  State.isTV     = (State.uid === State.tvUID);
+  State.isViewer = (role === 'zuschauer');
 
-  // Beim Tab-Schließen: Nur Gäste entfernen sich automatisch.
-  // Der Host-Eintrag bleibt für Reconnect.
   window.addEventListener('beforeunload', () => {
-    if (!State.isHost) {
-      db.ref(`lobbies/${State.lobbyCode}/players/${State.uid}`).remove();
-    }
+    if (!State.isHost) db.ref(`lobbies/${State.lobbyCode}/players/${State.uid}`).remove();
   });
+}
+
+// ══════════════════════════════════════════════════════════════
+//  KICK & ROLLEN-MANAGEMENT (Host + Mod)
+// ══════════════════════════════════════════════════════════════
+async function kickPlayer(uid) {
+  const name = State.players[uid]?.name || 'Spieler';
+  log('Kick:', name);
+  await State.db.ref(`lobbies/${State.lobbyCode}/kicked/${uid}`).set(true);
+  await State.db.ref(`lobbies/${State.lobbyCode}/players/${uid}`).remove();
+  showToast(`🚫 ${name} entfernt.`);
+}
+
+async function setModerator(uid) {
+  const name = State.players[uid]?.name || 'Spieler';
+  const current = State.modUID;
+  if (current === uid) {
+    // Moderator entfernen
+    await State.db.ref(`lobbies/${State.lobbyCode}/modUID`).set(null);
+    showToast(`${name} ist kein Moderator mehr.`);
+  } else {
+    await State.db.ref(`lobbies/${State.lobbyCode}/modUID`).set(uid);
+    showToast(`${name} ist jetzt Moderator.`);
+  }
+}
+
+async function setTVPlayer(uid) {
+  const name = State.players[uid]?.name || 'Spieler';
+  const current = State.tvUID;
+  if (current === uid) {
+    await State.db.ref(`lobbies/${State.lobbyCode}/tvUID`).set(null);
+    document.getElementById('qr-area')?.classList.add('hidden');
+    showToast(`TV-Spieler entfernt.`);
+  } else {
+    await State.db.ref(`lobbies/${State.lobbyCode}/tvUID`).set(uid);
+    generateQR(State.lobbyCode);
+    showToast(`📺 ${name} ist jetzt TV-Spieler.`);
+  }
+}
+
+// ══════════════════════════════════════════════════════════════
+//  SPIELER-LIMIT & KATEGORIE
+// ══════════════════════════════════════════════════════════════
+async function updateMaxPlayers(val) {
+  State.maxPlayers = parseInt(val, 10);
+  await State.db.ref(`lobbies/${State.lobbyCode}/maxPlayers`).set(State.maxPlayers);
+  showToast(`👥 Limit: ${State.maxPlayers}`);
+}
+
+async function updateCategory(cat) {
+  State.category = cat;
+  await State.db.ref(`lobbies/${State.lobbyCode}/category`).set(cat);
+  showToast(`📚 Kategorie: ${CAT_LABELS[cat]}`);
 }
 
 // ══════════════════════════════════════════════════════════════
 //  LOBBY-SCREEN
 // ══════════════════════════════════════════════════════════════
-
 function enterLobbyScreen() {
-  log('Lobby-Screen – Code:', State.lobbyCode, '| isHost:', State.isHost);
-
-  removeAllListeners(); // Doppelte Listener verhindern
+  log('Lobby-Screen – isHost:', State.isHost, 'role:', State.role);
+  removeAllListeners();
 
   document.getElementById('lobby-code-display').textContent = State.lobbyCode;
+  document.getElementById('category-display').textContent   = CAT_LABELS[State.category] || State.category;
 
   const hostControls = document.getElementById('host-controls');
   const waitingMsg   = document.getElementById('waiting-msg');
   const inviteArea   = document.getElementById('invite-area');
-  const limitDisplay = document.getElementById('limit-display');
 
   if (State.isHost) {
     hostControls.classList.remove('hidden');
     waitingMsg.classList.add('hidden');
-    // Limit-Dropdown auf aktuellen Wert setzen
-    const sel = document.getElementById('select-max-players');
-    if (sel) sel.value = String(State.maxPlayers);
+    const sel = document.getElementById('lobby-slider-max');
+    if (sel) {
+      sel.value = String(State.maxPlayers);
+      updateSliderFill(sel);
+      document.getElementById('lobby-slider-val').textContent = State.maxPlayers;
+    }
+    // Kategorie-Chips im Lobby setzen
+    document.querySelectorAll('#lobby-category-chips .chip').forEach(chip => {
+      chip.classList.toggle('active', chip.dataset.cat === State.category);
+    });
   } else {
     hostControls.classList.add('hidden');
     waitingMsg.classList.remove('hidden');
   }
 
-  // Einlade-Bereich für alle sichtbar
   if (inviteArea) inviteArea.classList.remove('hidden');
 
-  // ── Kicked-Listener: Prüfen ob DIESER User rausgeworfen wurde ──
-  const kickedRef = State.db.ref(`lobbies/${State.lobbyCode}/kicked/${State.uid}`);
-  addListener(kickedRef, 'value', (snap) => {
+  // QR-Code falls TV-Spieler vorhanden
+  if (State.tvUID) generateQR(State.lobbyCode);
+
+  // ── Kicked-Listener ──
+  addListener(State.db.ref(`lobbies/${State.lobbyCode}/kicked/${State.uid}`), 'value', snap => {
     if (snap.val() === true) {
-      log('Dieser Spieler wurde gekickt');
       removeAllListeners();
       localStorage.removeItem('onechance_lobby');
-      State.lobbyCode = null;
-      State.isHost    = false;
+      State.lobbyCode = null; State.isHost = false;
       showScreen('start');
       showToast('🚫 Du wurdest aus der Lobby entfernt.');
     }
   });
 
-  // ── Spielerliste live ──
-  addListener(
-    State.db.ref(`lobbies/${State.lobbyCode}/players`),
-    'value',
-    (snap) => {
-      State.players = snap.val() || {};
-      log('Spieler:', Object.keys(State.players).length);
-      renderPlayerList();
-      updateStartButton();
-    }
-  );
+  // ── Spielerliste ──
+  addListener(State.db.ref(`lobbies/${State.lobbyCode}/players`), 'value', snap => {
+    State.players = snap.val() || {};
+    renderPlayerList();
+    updateStartButton();
+  });
 
-  // ── Spieler-Limit live beobachten (für Gäste) ──
-  addListener(
-    State.db.ref(`lobbies/${State.lobbyCode}/maxPlayers`),
-    'value',
-    (snap) => {
-      const limit = snap.val();
-      if (limit) {
-        State.maxPlayers = limit;
-        if (limitDisplay) limitDisplay.textContent = `Max. ${limit} Spieler`;
-      }
+  // ── modUID / tvUID live ──
+  addListener(State.db.ref(`lobbies/${State.lobbyCode}/modUID`), 'value', snap => {
+    State.modUID = snap.val();
+    State.isMod  = (State.uid === State.modUID);
+    renderPlayerList();
+  });
+  addListener(State.db.ref(`lobbies/${State.lobbyCode}/tvUID`), 'value', snap => {
+    State.tvUID = snap.val();
+    State.isTV  = (State.uid === State.tvUID);
+    if (State.tvUID) generateQR(State.lobbyCode);
+    else document.getElementById('qr-area')?.classList.add('hidden');
+    renderPlayerList();
+  });
+
+  // ── Kategorie live ──
+  addListener(State.db.ref(`lobbies/${State.lobbyCode}/category`), 'value', snap => {
+    if (snap.val()) {
+      State.category = snap.val();
+      document.getElementById('category-display').textContent = CAT_LABELS[snap.val()] || snap.val();
     }
-  );
+  });
+
+  // ── Limit live ──
+  addListener(State.db.ref(`lobbies/${State.lobbyCode}/maxPlayers`), 'value', snap => {
+    if (snap.val()) State.maxPlayers = snap.val();
+  });
 
   // ── Phasenwechsel ──
-  addListener(
-    State.db.ref(`lobbies/${State.lobbyCode}/phase`),
-    'value',
-    (snap) => {
-      const phase = snap.val();
-      log('Phase:', phase);
-      if (phase && phase !== 'lobby') handlePhaseChange(phase);
-    }
-  );
+  addListener(State.db.ref(`lobbies/${State.lobbyCode}/phase`), 'value', snap => {
+    const phase = snap.val();
+    if (phase && phase !== 'lobby') handlePhaseChange(phase);
+  });
 
   showScreen('lobby');
 }
@@ -485,18 +478,15 @@ function renderPlayerList() {
   const list = document.getElementById('player-list');
   list.innerHTML = '';
 
-  State.db.ref(`lobbies/${State.lobbyCode}/host`).once('value').then(snap => {
-    const dbHostUID = snap.val();
-    const count     = Object.keys(State.players).length;
+  const activeCount = Object.values(State.players).filter(p => p.role !== 'zuschauer').length;
+  document.getElementById('player-count').textContent = `${activeCount} / ${State.maxPlayers}`;
 
-    // Spielerzähler
-    const counter = document.getElementById('player-count');
-    if (counter) counter.textContent = `${count} / ${State.maxPlayers}`;
+  State.db.ref(`lobbies/${State.lobbyCode}/host`).once('value').then(snap => {
+    const hostUID = snap.val();
 
     Object.entries(State.players).forEach(([uid, player]) => {
       const li = document.createElement('li');
 
-      // Avatar
       const avatar = document.createElement('div');
       avatar.className   = 'player-avatar';
       avatar.textContent = (player.name || '?')[0].toUpperCase();
@@ -508,34 +498,59 @@ function renderPlayerList() {
       li.appendChild(avatar);
       li.appendChild(nameEl);
 
-      // Host-Badge
-      if (uid === dbHostUID) {
-        const badge = document.createElement('span');
-        badge.className   = 'host-badge';
-        badge.textContent = 'HOST';
-        li.appendChild(badge);
+      // Badges
+      if (uid === hostUID) {
+        const b = document.createElement('span'); b.className = 'host-badge'; b.textContent = 'HOST'; li.appendChild(b);
+      }
+      if (uid === State.modUID) {
+        const b = document.createElement('span'); b.className = 'mod-badge'; b.textContent = 'MOD'; li.appendChild(b);
+      }
+      if (uid === State.tvUID) {
+        const b = document.createElement('span'); b.className = 'tv-badge'; b.textContent = '📺 TV'; li.appendChild(b);
+      }
+      if (player.role === 'zuschauer') {
+        const b = document.createElement('span'); b.className = 'viewer-badge'; b.textContent = '👁 Zuschauer'; li.appendChild(b);
+      }
+      if (uid === State.uid && uid !== hostUID) {
+        const b = document.createElement('span'); b.className = 'me-badge'; b.textContent = 'Du'; li.appendChild(b);
       }
 
-      // Ich-Badge (für Gäste)
-      if (uid === State.uid && uid !== dbHostUID) {
-        const meBadge = document.createElement('span');
-        meBadge.className   = 'me-badge';
-        meBadge.textContent = 'Du';
-        li.appendChild(meBadge);
-      }
+      // Aktionsbuttons (Host oder Mod können kicken; nur Host setzt Rollen)
+      if ((State.isHost || State.isMod) && uid !== State.uid) {
+        const actions = document.createElement('div');
+        actions.className = 'player-actions';
 
-      // Kick-Button: nur für Host, nicht für sich selbst
-      if (State.isHost && uid !== State.uid) {
+        // Kick
         const kickBtn = document.createElement('button');
         kickBtn.className   = 'btn-kick';
         kickBtn.title       = `${player.name} entfernen`;
         kickBtn.textContent = '✕';
         kickBtn.addEventListener('click', () => {
-          if (confirm(`${player.name} wirklich aus der Lobby entfernen?`)) {
-            kickPlayer(uid);
-          }
+          if (confirm(`${player.name} wirklich entfernen?`)) kickPlayer(uid);
         });
-        li.appendChild(kickBtn);
+        actions.appendChild(kickBtn);
+
+        // Moderator (nur Host)
+        if (State.isHost && player.role !== 'zuschauer') {
+          const modBtn = document.createElement('button');
+          modBtn.className   = 'btn-role-action';
+          modBtn.title       = uid === State.modUID ? 'Moderator entfernen' : 'Als Moderator setzen';
+          modBtn.textContent = uid === State.modUID ? '🔵' : '⭐';
+          modBtn.addEventListener('click', () => setModerator(uid));
+          actions.appendChild(modBtn);
+        }
+
+        // TV-Spieler (nur Host, nur echte Spieler)
+        if (State.isHost && player.role !== 'zuschauer') {
+          const tvBtn = document.createElement('button');
+          tvBtn.className   = 'btn-role-action btn-tv-action';
+          tvBtn.title       = uid === State.tvUID ? 'TV-Spieler entfernen' : 'Als TV-Spieler markieren';
+          tvBtn.textContent = uid === State.tvUID ? '📺✕' : '📺';
+          tvBtn.addEventListener('click', () => setTVPlayer(uid));
+          actions.appendChild(tvBtn);
+        }
+
+        li.appendChild(actions);
       }
 
       list.appendChild(li);
@@ -543,133 +558,268 @@ function renderPlayerList() {
   });
 }
 
-// Start-Button freischalten ab 3 Spielern
 function updateStartButton() {
-  const count = Object.keys(State.players).length;
-  const btn   = document.getElementById('btn-start');
-  const hint  = document.getElementById('host-hint');
+  const activeCount = Object.values(State.players).filter(p => p.role !== 'zuschauer').length;
+  const btn  = document.getElementById('btn-start');
+  const hint = document.getElementById('host-hint');
   if (!btn) return;
-
-  btn.disabled = count < 3;
-  hint.textContent = count >= 3
-    ? `${count} Spieler bereit – los geht's!`
-    : `Mindestens 3 Spieler benötigt (aktuell: ${count}).`;
+  btn.disabled = activeCount < 3;
+  hint.textContent = activeCount >= 3
+    ? `${activeCount} Spieler bereit – los geht's!`
+    : `Mindestens 3 Spieler benötigt (aktuell: ${activeCount}).`;
 }
 
 // ══════════════════════════════════════════════════════════════
 //  SPIEL STARTEN
 // ══════════════════════════════════════════════════════════════
-
 async function startGame() {
-  log('Spiel starten');
-  const playerUIDs   = Object.keys(State.players);
-  const guesserUID   = playerUIDs[Math.floor(Math.random() * playerUIDs.length)];
-  const word         = WORD_LIST[Math.floor(Math.random() * WORD_LIST.length)];
+  log('Spiel starten – Kategorie:', State.category);
 
-  log('Rater:', State.players[guesserUID]?.name, '| Wort:', word);
+  // Mögliche Rater: alle aktiven Spieler OHNE Zuschauer
+  const activePlayers = Object.entries(State.players)
+    .filter(([uid, p]) => p.role !== 'zuschauer');
+
+  let guesserUID;
+
+  if (State.tvUID && State.players[State.tvUID]) {
+    // TV-Spieler ist immer Rater
+    guesserUID = State.tvUID;
+    log('TV-Spieler ist Rater:', State.players[guesserUID]?.name);
+  } else {
+    // Zufälligen Rater wählen
+    const idx  = Math.floor(Math.random() * activePlayers.length);
+    guesserUID = activePlayers[idx][0];
+
+    // Wenn Host raten würde und es keinen Moderator gibt → zufälligen anderen als Wort-Wächter setzen
+    if (guesserUID === State.uid && !State.modUID) {
+      log('Host wäre Rater ohne Mod – Wort wird trotzdem zufällig gewählt, Mod-Funktion temporär übertragen');
+      // Keinen automatischen Mod setzen – der Host sieht das Wort nicht (er ist Rater)
+    }
+    log('Zufälliger Rater:', State.players[guesserUID]?.name);
+  }
+
+  const word = getRandomWord(State.category);
+  log('Gesuchtes Wort:', word);
 
   await State.db.ref(`lobbies/${State.lobbyCode}`).update({
     phase:      'clue',
     secretWord: word,
     guesserUID: guesserUID,
     clues:      {},
+    modStrikes: {},
     guess:      null,
+    verdict:    null,
   });
 }
 
 // ══════════════════════════════════════════════════════════════
 //  PHASENWECHSEL
 // ══════════════════════════════════════════════════════════════
-
 async function handlePhaseChange(phase) {
-  log('Phasenwechsel:', phase);
-
+  log('Phase:', phase);
   const snap = await State.db.ref(`lobbies/${State.lobbyCode}`).once('value');
   const data  = snap.val();
 
   State.phase      = phase;
   State.secretWord = data.secretWord;
   State.guesserUID = data.guesserUID;
+  State.modUID     = data.modUID  || null;
+  State.tvUID      = data.tvUID   || null;
+  State.isMod      = (State.uid === State.modUID);
+  State.isTV       = (State.uid === State.tvUID);
   State.isGuesser  = (State.uid === State.guesserUID);
-  State.clues      = data.clues || {};
+  State.isViewer   = (State.role === 'zuschauer');
+  State.clues      = data.clues      || {};
+  State.modStrikes = data.modStrikes || {};
 
   switch (phase) {
-    case 'clue':   enterCluePhase();         break;
-    case 'reveal': enterRevealPhase();        break;
-    case 'guess':  enterGuessPhase();         break;
-    case 'result': enterResultPhase(data.guess); break;
+    case 'clue':       enterCluePhase();       break;
+    case 'mod-review': enterModReviewPhase();  break;
+    case 'reveal':     enterRevealPhase();     break;
+    case 'guess':      enterGuessPhase();      break;
+    case 'result':     enterResultPhase(data.guess, data.verdict); break;
   }
 }
 
 // ══════════════════════════════════════════════════════════════
 //  PHASE: CLUE
 // ══════════════════════════════════════════════════════════════
-
 function enterCluePhase() {
-  log('Clue-Phase – isGuesser:', State.isGuesser);
-  if (State.isGuesser) {
-    showScreen('guesserWait');
-  } else {
-    document.getElementById('secret-word-display').textContent = State.secretWord;
-    document.getElementById('input-clue').value    = '';
-    document.getElementById('input-clue').disabled = false;
-    document.getElementById('btn-submit-clue').disabled = false;
-    document.getElementById('clue-submitted-msg').classList.add('hidden');
-    showScreen('clue');
-    watchForAllCluesSubmitted();
+  log('Clue-Phase – isGuesser:', State.isGuesser, 'isTV:', State.isTV, 'isViewer:', State.isViewer, 'isMod:', State.isMod);
+
+  if (State.isViewer || State.isMod) {
+    // Zuschauer & Mod: Observer-Screen mit Wort + Eingaben
+    enterObserverScreen();
+    watchCluesForObserver();
+    return;
   }
+
+  if (State.isGuesser || State.isTV) {
+    // Rater / TV-Spieler: Warte-Screen ohne Wort
+    showScreen(State.isTV ? 'tvWait' : 'guesserWait');
+    return;
+  }
+
+  // Normaler Spieler → Hinweis eingeben
+  document.getElementById('secret-word-display').textContent = State.secretWord;
+  document.getElementById('input-clue').value    = '';
+  document.getElementById('input-clue').disabled = false;
+  document.getElementById('btn-submit-clue').disabled = false;
+  document.getElementById('clue-submitted-msg').classList.add('hidden');
+  showScreen('clue');
+  watchForAllCluesSubmitted();
 }
 
 async function submitClue() {
-  const clueText = document.getElementById('input-clue').value.trim();
-  if (!clueText) return;
-
-  log('Hinweis:', clueText);
+  const text = document.getElementById('input-clue').value.trim();
+  if (!text) return;
+  log('Hinweis:', text);
   document.getElementById('input-clue').disabled      = true;
   document.getElementById('btn-submit-clue').disabled = true;
   document.getElementById('clue-submitted-msg').classList.remove('hidden');
-
-  await State.db.ref(`lobbies/${State.lobbyCode}/clues/${State.uid}`).set(clueText);
+  await State.db.ref(`lobbies/${State.lobbyCode}/clues/${State.uid}`).set(text);
 }
 
 function watchForAllCluesSubmitted() {
-  addListener(
-    State.db.ref(`lobbies/${State.lobbyCode}/clues`),
-    'value',
-    async (snap) => {
-      const clues       = snap.val() || {};
-      const clueCount   = Object.keys(clues).length;
-      const giversCount = Object.keys(State.players).length - 1;
+  addListener(State.db.ref(`lobbies/${State.lobbyCode}/clues`), 'value', async snap => {
+    const clues = snap.val() || {};
+    // Nur aktive, nicht-zuschauende, nicht-ratende Spieler müssen tippen
+    const givers = Object.entries(State.players)
+      .filter(([uid, p]) => p.role !== 'zuschauer' && uid !== State.guesserUID);
 
-      log(`Clues: ${clueCount}/${giversCount}`);
+    log(`Clues: ${Object.keys(clues).length}/${givers.length}`);
 
-      if (clueCount >= giversCount && State.isHost) {
-        await State.db.ref(`lobbies/${State.lobbyCode}`).update({
-          phase: 'reveal',
-          clues: clues,
-        });
-      }
+    if (Object.keys(clues).length >= givers.length && State.isHost) {
+      // Gibt es einen Moderator? → mod-review, sonst direkt reveal
+      const nextPhase = State.modUID ? 'mod-review' : 'reveal';
+      log('Alle Hinweise – weiter zu:', nextPhase);
+      await State.db.ref(`lobbies/${State.lobbyCode}`).update({ phase: nextPhase, clues });
     }
-  );
+  });
 }
 
 // ══════════════════════════════════════════════════════════════
-//  PHASE: REVEAL
+//  PHASE: MOD-REVIEW (Moderator prüft Hinweise)
 // ══════════════════════════════════════════════════════════════
+function enterModReviewPhase() {
+  log('Mod-Review – isMod:', State.isMod, 'isViewer:', State.isViewer);
 
+  if (State.isMod) {
+    renderModReviewList();
+    showScreen('modReview');
+    return;
+  }
+
+  if (State.isViewer) {
+    enterObserverScreen();
+    watchCluesForObserver();
+    return;
+  }
+
+  if (State.isGuesser || State.isTV) {
+    showScreen(State.isTV ? 'tvWait' : 'guesserWait');
+    return;
+  }
+
+  // Wortgeber warten
+  showScreen('guesserWait');
+  document.querySelector('#screen-guesser-wait .wait-title').textContent = 'Moderator prüft…';
+}
+
+function renderModReviewList() {
+  const list = document.getElementById('mod-clue-list');
+  list.innerHTML = '';
+
+  Object.entries(State.clues).forEach(([uid, text], i) => {
+    const li     = document.createElement('li');
+    const bullet = document.createElement('div');
+    bullet.className   = 'clue-bullet';
+    bullet.textContent = i + 1;
+
+    const textNode = document.createTextNode(text);
+
+    const strikeBtn = document.createElement('button');
+    strikeBtn.className   = 'btn-mod-strike';
+    strikeBtn.textContent = '✕ Streichen';
+    strikeBtn.dataset.uid = uid;
+    strikeBtn.dataset.struck = 'false';
+
+    strikeBtn.addEventListener('click', () => {
+      const isStruck = strikeBtn.dataset.struck === 'true';
+      if (isStruck) {
+        // Rückgängig
+        li.classList.remove('mod-struck');
+        strikeBtn.textContent    = '✕ Streichen';
+        strikeBtn.dataset.struck = 'false';
+        strikeBtn.classList.remove('undone');
+      } else {
+        li.classList.add('mod-struck');
+        strikeBtn.textContent    = '↩ Zurück';
+        strikeBtn.dataset.struck = 'true';
+        strikeBtn.classList.add('undone');
+      }
+    });
+
+    li.appendChild(bullet);
+    li.appendChild(textNode);
+    li.appendChild(strikeBtn);
+    list.appendChild(li);
+  });
+}
+
+async function confirmModReview() {
+  log('Mod bestätigt Prüfung');
+
+  // Gestrichene UIDs sammeln
+  const struckUIDs = {};
+  document.querySelectorAll('#mod-clue-list .btn-mod-strike[data-struck="true"]').forEach(btn => {
+    struckUIDs[btn.dataset.uid] = true;
+  });
+
+  log('Gestrichene Clue-UIDs:', Object.keys(struckUIDs));
+
+  await State.db.ref(`lobbies/${State.lobbyCode}`).update({
+    phase:      'reveal',
+    modStrikes: struckUIDs,
+  });
+}
+
+// ══════════════════════════════════════════════════════════════
+//  PHASE: REVEAL (Animiertes Durchstreichen – OHNE Rater)
+// ══════════════════════════════════════════════════════════════
 async function enterRevealPhase() {
-  log('Reveal-Phase');
+  log('Reveal – isGuesser:', State.isGuesser, 'isTV:', State.isTV);
 
-  const snap  = await State.db.ref(`lobbies/${State.lobbyCode}/clues`).once('value');
-  State.clues = snap.val() || {};
+  // Rater / TV-Spieler sehen diesen Screen NICHT
+  if (State.isGuesser || State.isTV) {
+    showScreen(State.isTV ? 'tvWait' : 'guesserWait');
+    document.querySelector('#screen-guesser-wait .wait-title').textContent = 'Gleich geht\'s los…';
+    // Auf Guess-Phase warten
+    watchForPhase('guess');
+    return;
+  }
 
-  const allClues   = Object.entries(State.clues);
-  const duplicates = findDuplicates(allClues.map(([, t]) => t));
-  log('Duplikate:', [...duplicates]);
+  if (State.isViewer || State.isMod) {
+    enterObserverScreen();
+    watchCluesForObserver();
+    // Warten bis guess Phase
+    watchForPhase('guess');
+    return;
+  }
+
+  // Wortgeber & Host: Animation anzeigen
+  const snap       = await State.db.ref(`lobbies/${State.lobbyCode}`).once('value');
+  const data        = snap.val();
+  State.clues      = data.clues      || {};
+  State.modStrikes = data.modStrikes || {};
+
+  const allEntries = Object.entries(State.clues);
+  const duplicates = findDuplicates(allEntries.map(([, t]) => t));
+  log('Duplikate:', [...duplicates], '| Mod-Strikes:', Object.keys(State.modStrikes));
 
   const list = document.getElementById('clue-list');
   list.innerHTML = '';
-  allClues.forEach(([uid, text], i) => {
+  allEntries.forEach(([uid, text], i) => {
     const li     = document.createElement('li');
     const bullet = document.createElement('div');
     bullet.className   = 'clue-bullet';
@@ -677,52 +827,86 @@ async function enterRevealPhase() {
     li.appendChild(bullet);
     li.appendChild(document.createTextNode(text));
     li.dataset.text = text.toLowerCase().trim();
+    li.dataset.uid  = uid;
     list.appendChild(li);
   });
 
   showScreen('reveal');
+
+  // Zuerst Mod-Strikes sofort grau markieren
+  Object.keys(State.modStrikes).forEach(uid => {
+    const el = list.querySelector(`li[data-uid="${uid}"]`);
+    if (el) el.classList.add('mod-struck');
+  });
+
+  // Dann Duplikate animiert streichen (nach 800ms)
   setTimeout(() => animateStrikethrough(duplicates), 800);
 
-  const animMs = 800 + duplicates.size * 500 + 1200;
-  setTimeout(() => {
-    if (State.isHost) {
-      document.getElementById('btn-to-guess').classList.remove('hidden');
-    }
-  }, animMs);
+  // Countdown-Ring nach der Animation starten
+  const animDuration = 800 + duplicates.size * 500 + 400;
+  setTimeout(() => startRevealCountdown(5), animDuration);
 }
 
 function findDuplicates(texts) {
-  const seen  = new Set();
-  const dupes = new Set();
-  texts.forEach(t => {
-    const n = t.toLowerCase().trim();
-    if (seen.has(n)) dupes.add(n);
-    else seen.add(n);
-  });
+  const seen = new Set(); const dupes = new Set();
+  texts.forEach(t => { const n = t.toLowerCase().trim(); seen.has(n) ? dupes.add(n) : seen.add(n); });
   return dupes;
 }
 
-function animateStrikethrough(duplicates) {
-  if (!duplicates.size) return;
+function animateStrikethrough(dupes) {
+  if (!dupes.size) return;
   let delay = 0;
   document.querySelectorAll('#clue-list li').forEach(li => {
-    if (duplicates.has(li.dataset.text)) {
+    if (dupes.has(li.dataset.text)) {
       setTimeout(() => li.classList.add('strike'), delay);
       delay += 500;
     }
   });
 }
 
+// Countdown-Ring – automatische Weiterleitung nach N Sekunden
+function startRevealCountdown(seconds) {
+  const area   = document.getElementById('reveal-countdown');
+  const circle = document.getElementById('countdown-circle');
+  const numEl  = document.getElementById('countdown-num');
+  const circum = 226; // 2 * PI * 36
+
+  area.classList.remove('hidden');
+  numEl.textContent           = seconds;
+  circle.style.strokeDashoffset = 0;
+
+  let remaining = seconds;
+  const tick = setInterval(async () => {
+    remaining--;
+    numEl.textContent = remaining;
+    circle.style.strokeDashoffset = circum - (remaining / seconds) * circum;
+
+    if (remaining <= 0) {
+      clearInterval(tick);
+      log('Countdown abgelaufen – wechsle zu Guess');
+      await proceedToGuess();
+    }
+  }, 1000);
+}
+
 async function proceedToGuess() {
   log('Zu Guess-Phase');
-  const snap  = await State.db.ref(`lobbies/${State.lobbyCode}/clues`).once('value');
-  const clues = snap.val() || {};
-  const dupes = findDuplicates(Object.values(clues));
 
+  const snap  = await State.db.ref(`lobbies/${State.lobbyCode}`).once('value');
+  const data   = snap.val();
+  const clues  = data.clues      || {};
+  const strikes = data.modStrikes || {};
+  const dupes  = findDuplicates(Object.values(clues));
+
+  // Valide Hinweise: nicht doppelt UND nicht vom Mod gestrichen
   const validClues = {};
   Object.entries(clues).forEach(([uid, text]) => {
-    if (!dupes.has(text.toLowerCase().trim())) validClues[uid] = text;
+    const isDupe    = dupes.has(text.toLowerCase().trim());
+    const isStruck  = !!strikes[uid];
+    if (!isDupe && !isStruck) validClues[uid] = text;
   });
+
+  log('Valide Hinweise:', validClues);
 
   await State.db.ref(`lobbies/${State.lobbyCode}`).update({
     phase: 'guess',
@@ -731,62 +915,178 @@ async function proceedToGuess() {
 }
 
 // ══════════════════════════════════════════════════════════════
+//  ZUSCHAUER / MOD OBSERVER-SCREEN
+// ══════════════════════════════════════════════════════════════
+function enterObserverScreen() {
+  log('Observer-Screen – Wort:', State.secretWord);
+
+  const badge = document.getElementById('observer-role-badge');
+  if (State.isMod) {
+    badge.className   = 'role-badge mod';
+    badge.textContent = 'Moderator';
+  } else {
+    badge.className   = 'role-badge viewer';
+    badge.textContent = 'Zuschauer';
+  }
+
+  document.getElementById('observer-secret-word').textContent = State.secretWord || '—';
+  document.getElementById('observer-clue-list').innerHTML = '';
+  document.getElementById('observer-guess-area').classList.add('hidden');
+  showScreen('observer');
+}
+
+function watchCluesForObserver() {
+  addListener(State.db.ref(`lobbies/${State.lobbyCode}/clues`), 'value', snap => {
+    const clues = snap.val() || {};
+    const list  = document.getElementById('observer-clue-list');
+    if (!list) return;
+    list.innerHTML = '';
+    Object.entries(clues).forEach(([uid, text], i) => {
+      const li     = document.createElement('li');
+      const bullet = document.createElement('div');
+      bullet.className   = 'clue-bullet';
+      bullet.textContent = i + 1;
+      li.appendChild(bullet);
+      li.appendChild(document.createTextNode(`${State.players[uid]?.name || '?'}: ${text}`));
+      list.appendChild(li);
+    });
+  });
+}
+
+function watchForPhase(targetPhase) {
+  addListener(State.db.ref(`lobbies/${State.lobbyCode}/phase`), 'value', snap => {
+    if (snap.val() === targetPhase) handlePhaseChange(targetPhase);
+  });
+}
+
+// ══════════════════════════════════════════════════════════════
 //  PHASE: GUESS
 // ══════════════════════════════════════════════════════════════
-
 async function enterGuessPhase() {
-  log('Guess-Phase – isGuesser:', State.isGuesser);
+  log('Guess – isGuesser:', State.isGuesser, 'isTV:', State.isTV);
 
   const snap  = await State.db.ref(`lobbies/${State.lobbyCode}/clues`).once('value');
   State.clues = snap.val() || {};
+  const validClues = Object.values(State.clues);
 
-  if (State.isGuesser) {
+  if (State.isViewer || State.isMod) {
+    // Observer weiter aktualisieren + auf Antwort warten
+    watchForPhase('result');
+    addListener(State.db.ref(`lobbies/${State.lobbyCode}/guess`), 'value', snap => {
+      if (snap.val()) {
+        document.getElementById('observer-guess-area').classList.remove('hidden');
+        document.getElementById('observer-guess-word').textContent = snap.val();
+      }
+    });
+    return;
+  }
+
+  if (State.isGuesser || State.isTV) {
+    // Hinweise anzeigen
     const list = document.getElementById('guesser-clue-list');
     list.innerHTML = '';
-    Object.values(State.clues).forEach(text => {
-      const li = document.createElement('li');
-      li.textContent = text;
-      list.appendChild(li);
+    validClues.forEach(text => {
+      const li = document.createElement('li'); li.textContent = text; list.appendChild(li);
     });
     document.getElementById('input-guess').value = '';
     showScreen('guess');
-  } else {
-    document.querySelector('#screen-guesser-wait .wait-title').textContent = 'Der Rater denkt nach…';
-    showScreen('guesserWait');
-    addListener(
-      State.db.ref(`lobbies/${State.lobbyCode}/phase`),
-      'value',
-      (snap) => {
-        if (snap.val() === 'result') {
-          State.db.ref(`lobbies/${State.lobbyCode}`).once('value').then(s => {
-            enterResultPhase(s.val().guess);
-          });
-        }
-      }
-    );
+    return;
   }
+
+  // Wortgeber warten
+  document.querySelector('#screen-guesser-wait .wait-title').textContent = 'Der Rater denkt nach…';
+  showScreen('guesserWait');
+  watchForPhase('result');
 }
 
 async function submitGuess() {
-  const guessText = document.getElementById('input-guess').value.trim();
-  if (!guessText) return;
+  const text = document.getElementById('input-guess').value.trim();
+  if (!text) return;
+  log('Antwort:', text);
 
-  log('Antwort:', guessText);
-  await State.db.ref(`lobbies/${State.lobbyCode}`).update({
-    phase: 'result',
-    guess: guessText,
-  });
+  // Bei TV-Modus: kein automatisches Richtig/Falsch – Mod/Host entscheidet
+  if (State.isTV) {
+    await State.db.ref(`lobbies/${State.lobbyCode}`).update({
+      phase: 'result',
+      guess: text,
+      verdict: null, // Wartet auf Moderator-Verdikt
+    });
+  } else {
+    await State.db.ref(`lobbies/${State.lobbyCode}`).update({
+      phase: 'result',
+      guess: text,
+    });
+  }
 }
 
 // ══════════════════════════════════════════════════════════════
 //  PHASE: RESULT
 // ══════════════════════════════════════════════════════════════
+async function enterResultPhase(guess, verdict) {
+  log('Result – Antwort:', guess, '| Verdikt:', verdict, '| Wort:', State.secretWord);
 
-async function enterResultPhase(guess) {
-  log('Result-Phase – Antwort:', guess, '| Wort:', State.secretWord);
+  const isTVMode = !!State.tvUID;
+  let   correct;
 
-  const correct = guess?.toLowerCase().trim() === State.secretWord?.toLowerCase().trim();
-  log(correct ? '✓ RICHTIG' : '✗ FALSCH');
+  if (isTVMode && verdict !== null && verdict !== undefined) {
+    // TV-Modus: Verdikt vom Mod/Host
+    correct = (verdict === true || verdict === 'true');
+  } else if (isTVMode && (verdict === null || verdict === undefined)) {
+    // TV-Modus: noch kein Verdikt → Verdikt-Buttons anzeigen
+    showVerdictScreen(guess);
+    return;
+  } else {
+    // Normal: automatisch prüfen
+    correct = guess?.toLowerCase().trim() === State.secretWord?.toLowerCase().trim();
+  }
+
+  renderResultScreen(guess, correct);
+}
+
+function showVerdictScreen(guess) {
+  // Warte-Screen für Spieler, Verdikt-Screen für Mod/Host
+  document.getElementById('result-icon').textContent  = '🤔';
+  document.getElementById('result-title').textContent = 'Was hat der Rater gesagt?';
+  document.getElementById('result-title').className   = 'result-title';
+  document.getElementById('result-guess').innerHTML   = `Antwort: <strong>${guess || '—'}</strong>`;
+  document.getElementById('result-word').innerHTML    = `Gesuchtes Wort: <strong>${State.secretWord}</strong>`;
+
+  const verdictBtns = document.getElementById('mod-verdict-btns');
+  const hostNext    = document.getElementById('host-next-controls');
+  const waitingNext = document.getElementById('waiting-next-msg');
+
+  // Nur Mod oder (Host wenn kein Mod) sehen Verdikt-Buttons
+  const canVerdict = State.isMod || (State.isHost && !State.modUID);
+  if (canVerdict) {
+    verdictBtns.classList.remove('hidden');
+    hostNext.classList.add('hidden');
+    waitingNext.classList.add('hidden');
+  } else {
+    verdictBtns.classList.add('hidden');
+    hostNext.classList.add('hidden');
+    waitingNext.classList.remove('hidden');
+    // Auf Verdikt warten
+    addListener(State.db.ref(`lobbies/${State.lobbyCode}/verdict`), 'value', snap => {
+      if (snap.val() !== null && snap.val() !== undefined) {
+        renderResultScreen(guess, snap.val() === true || snap.val() === 'true');
+      }
+    });
+  }
+
+  showScreen('result');
+}
+
+async function setVerdict(correct) {
+  log('Verdikt gesetzt:', correct);
+  await State.db.ref(`lobbies/${State.lobbyCode}`).update({ verdict: correct });
+  renderResultScreen(
+    document.getElementById('result-guess').textContent.replace('Antwort: ', ''),
+    correct
+  );
+}
+
+function renderResultScreen(guess, correct) {
+  log('Ergebnis rendern:', correct ? 'RICHTIG' : 'FALSCH');
 
   document.getElementById('result-icon').textContent  = correct ? '🎉' : '😬';
   document.getElementById('result-title').textContent = correct ? 'Richtig!' : 'Leider falsch…';
@@ -797,6 +1097,8 @@ async function enterResultPhase(guess) {
     `<strong>${guesserName}</strong> hat „<strong>${guess || '—'}</strong>" geraten.`;
   document.getElementById('result-word').innerHTML =
     `Das gesuchte Wort war: <strong>${State.secretWord}</strong>`;
+
+  document.getElementById('mod-verdict-btns').classList.add('hidden');
 
   if (State.isHost) {
     document.getElementById('host-next-controls').classList.remove('hidden');
@@ -812,7 +1114,6 @@ async function enterResultPhase(guess) {
 // ══════════════════════════════════════════════════════════════
 //  NÄCHSTE RUNDE / BEENDEN
 // ══════════════════════════════════════════════════════════════
-
 async function nextRound() {
   log('Nächste Runde');
   removeAllListeners();
@@ -821,7 +1122,9 @@ async function nextRound() {
     secretWord: null,
     guesserUID: null,
     clues:      {},
+    modStrikes: {},
     guess:      null,
+    verdict:    null,
   });
   setTimeout(() => enterLobbyScreen(), 300);
 }
@@ -831,8 +1134,7 @@ async function endGame() {
   removeAllListeners();
   await State.db.ref(`lobbies/${State.lobbyCode}`).remove();
   localStorage.removeItem('onechance_lobby');
-  State.lobbyCode = null;
-  State.isHost    = false;
+  State.lobbyCode = null; State.isHost = false;
   showScreen('start');
 }
 
@@ -840,6 +1142,73 @@ async function endGame() {
 //  EVENT LISTENER
 // ══════════════════════════════════════════════════════════════
 
+// ── Rollen-Auswahl Buttons ──
+let selectedRole = 'spieler';
+document.querySelectorAll('.role-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    selectedRole = btn.dataset.role;
+    document.querySelectorAll('.role-btn').forEach(b => b.className = 'role-btn');
+    btn.classList.add(selectedRole === 'spieler' ? 'active-spieler' : 'active-zuschauer');
+    State.role = selectedRole;
+    log('Rolle gewählt:', selectedRole);
+  });
+});
+
+// ── Kategorien-Chips Start-Screen ──
+let selectedCat = 'leicht';
+document.querySelectorAll('#screen-start .chip').forEach(chip => {
+  chip.addEventListener('click', () => {
+    selectedCat = chip.dataset.cat;
+    document.querySelectorAll('#screen-start .chip').forEach(c => c.classList.remove('active'));
+    chip.classList.add('active');
+    State.category = selectedCat;
+    log('Kategorie gewählt:', selectedCat);
+  });
+});
+
+// ── Lobby-Kategorie Chips ──
+document.querySelectorAll('#lobby-category-chips .chip').forEach(chip => {
+  chip.addEventListener('click', () => {
+    if (!State.isHost) return;
+    document.querySelectorAll('#lobby-category-chips .chip').forEach(c => c.classList.remove('active'));
+    chip.classList.add('active');
+    updateCategory(chip.dataset.cat);
+  });
+});
+
+// ── Slider Start-Screen ──
+const sliderStart = document.getElementById('slider-max-players');
+const sliderDisplay = document.getElementById('slider-val-display');
+if (sliderStart) {
+  sliderStart.addEventListener('input', () => {
+    sliderDisplay.textContent = sliderStart.value;
+    State.maxPlayers = parseInt(sliderStart.value, 10);
+    updateSliderFill(sliderStart);
+  });
+  updateSliderFill(sliderStart);
+}
+
+// ── URL-Parameter: Neue Lobby-Optionen ausblenden wenn Code vorhanden ──
+document.getElementById('input-lobby').addEventListener('input', () => {
+  const hasCode = document.getElementById('input-lobby').value.trim().length > 0;
+  document.getElementById('new-lobby-options').style.opacity = hasCode ? '0.4' : '1';
+});
+
+// ── Slider Lobby ──
+const sliderLobby = document.getElementById('lobby-slider-max');
+const sliderLobbyVal = document.getElementById('lobby-slider-val');
+if (sliderLobby) {
+  sliderLobby.addEventListener('input', () => {
+    sliderLobbyVal.textContent = sliderLobby.value;
+    updateSliderFill(sliderLobby);
+  });
+  sliderLobby.addEventListener('change', () => {
+    if (State.isHost) updateMaxPlayers(sliderLobby.value);
+  });
+  updateSliderFill(sliderLobby);
+}
+
+// ── Join-Button ──
 document.getElementById('btn-join').addEventListener('click', async () => {
   const name  = document.getElementById('input-name').value.trim();
   const code  = document.getElementById('input-lobby').value.trim().toUpperCase();
@@ -849,16 +1218,13 @@ document.getElementById('btn-join').addEventListener('click', async () => {
   if (!name)     { errEl.textContent = 'Bitte gib deinen Namen ein.'; return; }
   if (!State.db) { errEl.textContent = 'Firebase nicht verbunden.';   return; }
 
-  // Spieler-Limit aus Start-Dropdown (nur wenn neue Lobby)
-  const limitSel = document.getElementById('select-max-players-start');
-  if (limitSel && !code) State.maxPlayers = parseInt(limitSel.value, 10);
-
-  log('Join-Klick – Name:', name, '| Code:', code || '(neu)');
+  log('Join – Name:', name, '| Code:', code || '(neu)', '| Rolle:', selectedRole);
 
   try {
     State.uid  = getOrCreateUID();
     State.name = name;
-    await joinOrCreateLobby(name, code);
+    State.role = selectedRole;
+    await joinOrCreateLobby(name, code, selectedRole);
     enterLobbyScreen();
   } catch (e) {
     log('Fehler:', e.message);
@@ -866,15 +1232,14 @@ document.getElementById('btn-join').addEventListener('click', async () => {
   }
 });
 
-// Enter-Taste
-document.getElementById('input-name').addEventListener('keydown', e => {
-  if (e.key === 'Enter') document.getElementById('btn-join').click();
-});
-document.getElementById('input-lobby').addEventListener('keydown', e => {
-  if (e.key === 'Enter') document.getElementById('btn-join').click();
+// Enter-Tasten
+['input-name','input-lobby'].forEach(id => {
+  document.getElementById(id).addEventListener('keydown', e => {
+    if (e.key === 'Enter') document.getElementById('btn-join').click();
+  });
 });
 
-// Code kopieren
+// Lobby-Code kopieren
 document.getElementById('btn-copy-code').addEventListener('click', () => {
   const code = document.getElementById('lobby-code-display').textContent;
   navigator.clipboard.writeText(code).then(() => {
@@ -888,68 +1253,57 @@ document.getElementById('btn-copy-code').addEventListener('click', () => {
 document.getElementById('btn-invite-link').addEventListener('click', copyInviteLink);
 document.getElementById('btn-invite-wa').addEventListener('click', shareWhatsApp);
 
-// Spieler-Limit Dropdown (in Lobby)
-document.getElementById('select-max-players').addEventListener('change', e => {
-  updateMaxPlayers(e.target.value);
-});
-
-// Start
+// Spiel starten
 document.getElementById('btn-start').addEventListener('click', startGame);
 
 // Hinweis
 document.getElementById('btn-submit-clue').addEventListener('click', submitClue);
-document.getElementById('input-clue').addEventListener('keydown', e => {
-  if (e.key === 'Enter') submitClue();
-});
+document.getElementById('input-clue').addEventListener('keydown', e => { if (e.key === 'Enter') submitClue(); });
 
-// Reveal → Guess
-document.getElementById('btn-to-guess').addEventListener('click', proceedToGuess);
+// Mod-Review bestätigen
+document.getElementById('btn-mod-confirm').addEventListener('click', confirmModReview);
 
 // Raten
 document.getElementById('btn-submit-guess').addEventListener('click', submitGuess);
-document.getElementById('input-guess').addEventListener('keydown', e => {
-  if (e.key === 'Enter') submitGuess();
-});
+document.getElementById('input-guess').addEventListener('keydown', e => { if (e.key === 'Enter') submitGuess(); });
 
-// Ergebnis
+// Verdikt (TV-Modus)
+document.getElementById('btn-verdict-correct').addEventListener('click', () => setVerdict(true));
+document.getElementById('btn-verdict-wrong').addEventListener('click',   () => setVerdict(false));
+
+// Nächste Runde / Beenden
 document.getElementById('btn-next-round').addEventListener('click', nextRound);
 document.getElementById('btn-end-game').addEventListener('click', endGame);
 
 // ══════════════════════════════════════════════════════════════
-//  INITIALISIERUNG
+//  INIT
 // ══════════════════════════════════════════════════════════════
-
 (async function init() {
   log('Init');
 
   const ok = initFirebase();
   if (!ok) {
     showScreen('start');
-    document.getElementById('start-error').textContent =
-      'Firebase-Verbindung fehlgeschlagen. Bitte Seite neu laden.';
+    document.getElementById('start-error').textContent = 'Firebase-Fehler. Bitte neu laden.';
     return;
   }
 
-  // UID laden
   State.uid = getOrCreateUID();
 
   // Letzten Namen vorausfüllen
   const savedName = loadSavedName();
-  if (savedName) {
-    document.getElementById('input-name').value = savedName;
-    log('Letzter Name:', savedName);
-  }
+  if (savedName) document.getElementById('input-name').value = savedName;
 
-  // URL-Parameter: ?lobby=CODE → Einlade-Link
-  const urlParams  = new URLSearchParams(window.location.search);
-  const lobbyParam = urlParams.get('lobby');
+  // URL-Parameter ?lobby=CODE
+  const params = new URLSearchParams(window.location.search);
+  const lobbyParam = params.get('lobby');
   if (lobbyParam) {
     document.getElementById('input-lobby').value = lobbyParam.toUpperCase();
-    log('Lobby aus URL:', lobbyParam);
+    document.getElementById('new-lobby-options').style.opacity = '0.4';
     showToast(`🎮 Lobby ${lobbyParam} – Namen eingeben und beitreten!`);
   }
 
-  // Host-Reconnect prüfen (nur wenn kein URL-Parameter)
+  // Host-Reconnect (nur ohne URL-Parameter)
   if (!lobbyParam) {
     const reconnected = await checkHostReconnect(State.uid);
     if (reconnected) return;
