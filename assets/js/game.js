@@ -68,6 +68,7 @@ const State = {
   guesserUID:  null,
   modUID:      null,
   tvUID:       null,
+  hostUID:     null,        // FIX: gecacht, damit renderPlayerList() synchron bleibt
   maxPlayers:  8,
   category:    'leicht',
   players:     {},
@@ -245,6 +246,7 @@ async function checkHostReconnect(uid) {
 
     State.lobbyCode  = savedCode;
     State.isHost     = true;
+    State.hostUID    = uid;  // FIX: Host-UID cachen
     State.name       = savedName;
     State.maxPlayers = data.maxPlayers || 8;
     State.category   = data.category   || 'leicht';
@@ -288,6 +290,7 @@ async function joinOrCreateLobby(name, code, role) {
 
     State.lobbyCode  = code;
     State.isHost     = (data.host === State.uid);
+    State.hostUID    = data.host;  // FIX: Host-UID cachen
     State.maxPlayers = data.maxPlayers || 8;
     State.category   = data.category   || 'leicht';
     State.modUID     = data.modUID      || null;
@@ -314,6 +317,7 @@ async function joinOrCreateLobby(name, code, role) {
     });
     State.lobbyCode = newCode;
     State.isHost    = true;
+    State.hostUID   = State.uid;  // FIX: Host-UID cachen
     localStorage.setItem('onechance_lobby', newCode);
     log('Neue Lobby:', newCode);
   }
@@ -430,6 +434,12 @@ function enterLobbyScreen() {
     }
   });
 
+  // ── Host-UID einmalig laden und cachen (synchrone Basis für renderPlayerList) ──
+  State.db.ref(`lobbies/${State.lobbyCode}/host`).once('value').then(snap => {
+    State.hostUID = snap.val();
+    log('hostUID gecacht:', State.hostUID);
+  });
+
   // ── Spielerliste ──
   addListener(State.db.ref(`lobbies/${State.lobbyCode}/players`), 'value', snap => {
     State.players = snap.val() || {};
@@ -474,16 +484,19 @@ function enterLobbyScreen() {
 }
 
 // ── Spielerliste rendern ──────────────────────────────────────
+// KEIN async/await hier – State.hostUID ist bereits gecacht,
+// damit parallele Listener-Aufrufe sich nicht kumulieren
 function renderPlayerList() {
   const list = document.getElementById('player-list');
-  list.innerHTML = '';
+  list.innerHTML = '';  // einmal löschen, dann synchron neu aufbauen
 
   const activeCount = Object.values(State.players).filter(p => p.role !== 'zuschauer').length;
   document.getElementById('player-count').textContent = `${activeCount} / ${State.maxPlayers}`;
 
-  State.db.ref(`lobbies/${State.lobbyCode}/host`).once('value').then(snap => {
-    const hostUID = snap.val();
+  const hostUID = State.hostUID;  // synchron aus State lesen – kein Firebase-Call
 
+  // Sofort rendern (kein then/await → kein Race Condition)
+  ;(function renderEntries() {
     Object.entries(State.players).forEach(([uid, player]) => {
       const li = document.createElement('li');
 
@@ -555,7 +568,7 @@ function renderPlayerList() {
 
       list.appendChild(li);
     });
-  });
+  })(); // IIFE sofort ausführen
 }
 
 function updateStartButton() {
@@ -814,6 +827,505 @@ async function enterRevealPhase() {
   State.modStrikes = data.modStrikes || {};
 
   const allEntries = Object.entries(State.clues);
+  const duplicates = findDuplicates(allEntries.map(([, t]) => t));
+  log('Duplikate:', [...duplicates], '| Mod-Strikes:', Object.keys(State.modStrikes));
+
+  const list = document.getElementById('clue-list');
+  list.innerHTML = '';
+  allEntries.forEach(([uid, text], i) => {
+    const li     = document.createElement('li');
+    const bullet = document.createElement('div');
+    bullet.className   = 'clue-bullet';
+    bullet.textContent = i + 1;
+    li.appendChild(bullet);
+    li.appendChild(document.createTextNode(text));
+    li.dataset.text = text.toLowerCase().trim();
+    li.dataset.uid  = uid;
+    list.appendChild(li);
+  });
+
+  showScreen('reveal');
+
+  // Zuerst Mod-Strikes sofort grau markieren
+  Object.keys(State.modStrikes).forEach(uid => {
+    const el = list.querySelector(`li[data-uid="${uid}"]`);
+    if (el) el.classList.add('mod-struck');
+  });
+
+  // Dann Duplikate animiert streichen (nach 800ms)
+  setTimeout(() => animateStrikethrough(duplicates), 800);
+
+  // Countdown-Ring nach der Animation starten
+  const animDuration = 800 + duplicates.size * 500 + 400;
+  setTimeout(() => startRevealCountdown(5), animDuration);
+}
+
+function findDuplicates(texts) {
+  const seen = new Set(); const dupes = new Set();
+  texts.forEach(t => { const n = t.toLowerCase().trim(); seen.has(n) ? dupes.add(n) : seen.add(n); });
+  return dupes;
+}
+
+function animateStrikethrough(dupes) {
+  if (!dupes.size) return;
+  let delay = 0;
+  document.querySelectorAll('#clue-list li').forEach(li => {
+    if (dupes.has(li.dataset.text)) {
+      setTimeout(() => li.classList.add('strike'), delay);
+      delay += 500;
+    }
+  });
+}
+
+// Countdown-Ring – automatische Weiterleitung nach N Sekunden
+function startRevealCountdown(seconds) {
+  const area   = document.getElementById('reveal-countdown');
+  const circle = document.getElementById('countdown-circle');
+  const numEl  = document.getElementById('countdown-num');
+  const circum = 226; // 2 * PI * 36
+
+  area.classList.remove('hidden');
+  numEl.textContent           = seconds;
+  circle.style.strokeDashoffset = 0;
+
+  let remaining = seconds;
+  const tick = setInterval(async () => {
+    remaining--;
+    numEl.textContent = remaining;
+    circle.style.strokeDashoffset = circum - (remaining / seconds) * circum;
+
+    if (remaining <= 0) {
+      clearInterval(tick);
+      log('Countdown abgelaufen – wechsle zu Guess');
+      await proceedToGuess();
+    }
+  }, 1000);
+}
+
+async function proceedToGuess() {
+  log('Zu Guess-Phase');
+
+  const snap  = await State.db.ref(`lobbies/${State.lobbyCode}`).once('value');
+  const data   = snap.val();
+  const clues  = data.clues      || {};
+  const strikes = data.modStrikes || {};
+  const dupes  = findDuplicates(Object.values(clues));
+
+  // Valide Hinweise: nicht doppelt UND nicht vom Mod gestrichen
+  const validClues = {};
+  Object.entries(clues).forEach(([uid, text]) => {
+    const isDupe    = dupes.has(text.toLowerCase().trim());
+    const isStruck  = !!strikes[uid];
+    if (!isDupe && !isStruck) validClues[uid] = text;
+  });
+
+  log('Valide Hinweise:', validClues);
+
+  await State.db.ref(`lobbies/${State.lobbyCode}`).update({
+    phase: 'guess',
+    clues: validClues,
+  });
+}
+
+// ══════════════════════════════════════════════════════════════
+//  ZUSCHAUER / MOD OBSERVER-SCREEN
+// ══════════════════════════════════════════════════════════════
+function enterObserverScreen() {
+  log('Observer-Screen – Wort:', State.secretWord);
+
+  const badge = document.getElementById('observer-role-badge');
+  if (State.isMod) {
+    badge.className   = 'role-badge mod';
+    badge.textContent = 'Moderator';
+  } else {
+    badge.className   = 'role-badge viewer';
+    badge.textContent = 'Zuschauer';
+  }
+
+  document.getElementById('observer-secret-word').textContent = State.secretWord || '—';
+  document.getElementById('observer-clue-list').innerHTML = '';
+  document.getElementById('observer-guess-area').classList.add('hidden');
+  showScreen('observer');
+}
+
+function watchCluesForObserver() {
+  addListener(State.db.ref(`lobbies/${State.lobbyCode}/clues`), 'value', snap => {
+    const clues = snap.val() || {};
+    const list  = document.getElementById('observer-clue-list');
+    if (!list) return;
+    list.innerHTML = '';
+    Object.entries(clues).forEach(([uid, text], i) => {
+      const li     = document.createElement('li');
+      const bullet = document.createElement('div');
+      bullet.className   = 'clue-bullet';
+      bullet.textContent = i + 1;
+      li.appendChild(bullet);
+      li.appendChild(document.createTextNode(`${State.players[uid]?.name || '?'}: ${text}`));
+      list.appendChild(li);
+    });
+  });
+}
+
+function watchForPhase(targetPhase) {
+  addListener(State.db.ref(`lobbies/${State.lobbyCode}/phase`), 'value', snap => {
+    if (snap.val() === targetPhase) handlePhaseChange(targetPhase);
+  });
+}
+
+// ══════════════════════════════════════════════════════════════
+//  PHASE: GUESS
+// ══════════════════════════════════════════════════════════════
+async function enterGuessPhase() {
+  log('Guess – isGuesser:', State.isGuesser, 'isTV:', State.isTV);
+
+  const snap  = await State.db.ref(`lobbies/${State.lobbyCode}/clues`).once('value');
+  State.clues = snap.val() || {};
+  const validClues = Object.values(State.clues);
+
+  if (State.isViewer || State.isMod) {
+    // Observer weiter aktualisieren + auf Antwort warten
+    watchForPhase('result');
+    addListener(State.db.ref(`lobbies/${State.lobbyCode}/guess`), 'value', snap => {
+      if (snap.val()) {
+        document.getElementById('observer-guess-area').classList.remove('hidden');
+        document.getElementById('observer-guess-word').textContent = snap.val();
+      }
+    });
+    return;
+  }
+
+  if (State.isGuesser || State.isTV) {
+    // Hinweise anzeigen
+    const list = document.getElementById('guesser-clue-list');
+    list.innerHTML = '';
+    validClues.forEach(text => {
+      const li = document.createElement('li'); li.textContent = text; list.appendChild(li);
+    });
+    document.getElementById('input-guess').value = '';
+    // Rater-Karte zentrieren
+    document.querySelector('#screen-guess .clue-card').classList.add('guesser-mode');
+    showScreen('guess');
+    return;
+  }
+
+  // Wortgeber warten
+  document.querySelector('#screen-guesser-wait .wait-title').textContent = 'Der Rater denkt nach…';
+  showScreen('guesserWait');
+  watchForPhase('result');
+}
+
+async function submitGuess() {
+  const text = document.getElementById('input-guess').value.trim();
+  if (!text) return;
+  log('Antwort:', text);
+
+  // Bei TV-Modus: kein automatisches Richtig/Falsch – Mod/Host entscheidet
+  if (State.isTV) {
+    await State.db.ref(`lobbies/${State.lobbyCode}`).update({
+      phase: 'result',
+      guess: text,
+      verdict: null, // Wartet auf Moderator-Verdikt
+    });
+  } else {
+    await State.db.ref(`lobbies/${State.lobbyCode}`).update({
+      phase: 'result',
+      guess: text,
+    });
+  }
+}
+
+// ══════════════════════════════════════════════════════════════
+//  PHASE: RESULT
+// ══════════════════════════════════════════════════════════════
+async function enterResultPhase(guess, verdict) {
+  log('Result – Antwort:', guess, '| Verdikt:', verdict, '| Wort:', State.secretWord);
+
+  const isTVMode = !!State.tvUID;
+  let   correct;
+
+  if (isTVMode && verdict !== null && verdict !== undefined) {
+    // TV-Modus: Verdikt vom Mod/Host
+    correct = (verdict === true || verdict === 'true');
+  } else if (isTVMode && (verdict === null || verdict === undefined)) {
+    // TV-Modus: noch kein Verdikt → Verdikt-Buttons anzeigen
+    showVerdictScreen(guess);
+    return;
+  } else {
+    // Normal: automatisch prüfen
+    correct = guess?.toLowerCase().trim() === State.secretWord?.toLowerCase().trim();
+  }
+
+  renderResultScreen(guess, correct);
+}
+
+function showVerdictScreen(guess) {
+  // Warte-Screen für Spieler, Verdikt-Screen für Mod/Host
+  document.getElementById('result-icon').textContent  = '🤔';
+  document.getElementById('result-title').textContent = 'Was hat der Rater gesagt?';
+  document.getElementById('result-title').className   = 'result-title';
+  document.getElementById('result-guess').innerHTML   = `Antwort: <strong>${guess || '—'}</strong>`;
+  document.getElementById('result-word').innerHTML    = `Gesuchtes Wort: <strong>${State.secretWord}</strong>`;
+
+  const verdictBtns = document.getElementById('mod-verdict-btns');
+  const hostNext    = document.getElementById('host-next-controls');
+  const waitingNext = document.getElementById('waiting-next-msg');
+
+  // Nur Mod oder (Host wenn kein Mod) sehen Verdikt-Buttons
+  const canVerdict = State.isMod || (State.isHost && !State.modUID);
+  if (canVerdict) {
+    verdictBtns.classList.remove('hidden');
+    hostNext.classList.add('hidden');
+    waitingNext.classList.add('hidden');
+  } else {
+    verdictBtns.classList.add('hidden');
+    hostNext.classList.add('hidden');
+    waitingNext.classList.remove('hidden');
+    // Auf Verdikt warten
+    addListener(State.db.ref(`lobbies/${State.lobbyCode}/verdict`), 'value', snap => {
+      if (snap.val() !== null && snap.val() !== undefined) {
+        renderResultScreen(guess, snap.val() === true || snap.val() === 'true');
+      }
+    });
+  }
+
+  showScreen('result');
+}
+
+async function setVerdict(correct) {
+  log('Verdikt gesetzt:', correct);
+  await State.db.ref(`lobbies/${State.lobbyCode}`).update({ verdict: correct });
+  renderResultScreen(
+    document.getElementById('result-guess').textContent.replace('Antwort: ', ''),
+    correct
+  );
+}
+
+function renderResultScreen(guess, correct) {
+  log('Ergebnis rendern:', correct ? 'RICHTIG' : 'FALSCH');
+
+  document.getElementById('result-icon').textContent  = correct ? '🎉' : '😬';
+  document.getElementById('result-title').textContent = correct ? 'Richtig!' : 'Leider falsch…';
+  document.getElementById('result-title').className   = 'result-title ' + (correct ? 'correct' : 'wrong');
+
+  const guesserName = State.players[State.guesserUID]?.name || 'Der Rater';
+  document.getElementById('result-guess').innerHTML =
+    `<strong>${guesserName}</strong> hat „<strong>${guess || '—'}</strong>" geraten.`;
+  document.getElementById('result-word').innerHTML =
+    `Das gesuchte Wort war: <strong>${State.secretWord}</strong>`;
+
+  document.getElementById('mod-verdict-btns').classList.add('hidden');
+
+  if (State.isHost) {
+    document.getElementById('host-next-controls').classList.remove('hidden');
+    document.getElementById('waiting-next-msg').classList.add('hidden');
+  } else {
+    document.getElementById('host-next-controls').classList.add('hidden');
+    document.getElementById('waiting-next-msg').classList.remove('hidden');
+  }
+
+  showScreen('result');
+}
+
+// ══════════════════════════════════════════════════════════════
+//  NÄCHSTE RUNDE / BEENDEN
+// ══════════════════════════════════════════════════════════════
+async function nextRound() {
+  log('Nächste Runde');
+  removeAllListeners();
+  await State.db.ref(`lobbies/${State.lobbyCode}`).update({
+    phase:      'lobby',
+    secretWord: null,
+    guesserUID: null,
+    clues:      {},
+    modStrikes: {},
+    guess:      null,
+    verdict:    null,
+  });
+  setTimeout(() => enterLobbyScreen(), 300);
+}
+
+async function endGame() {
+  log('Spiel beenden');
+  removeAllListeners();
+  await State.db.ref(`lobbies/${State.lobbyCode}`).remove();
+  localStorage.removeItem('onechance_lobby');
+  State.lobbyCode = null; State.isHost = false;
+  showScreen('start');
+}
+
+// ══════════════════════════════════════════════════════════════
+//  EVENT LISTENER
+// ══════════════════════════════════════════════════════════════
+
+// ── Rollen-Auswahl Buttons ──
+let selectedRole = 'spieler';
+document.querySelectorAll('.role-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    selectedRole = btn.dataset.role;
+    document.querySelectorAll('.role-btn').forEach(b => b.className = 'role-btn');
+    btn.classList.add(selectedRole === 'spieler' ? 'active-spieler' : 'active-zuschauer');
+    State.role = selectedRole;
+    log('Rolle gewählt:', selectedRole);
+  });
+});
+
+// ── Kategorien-Chips Start-Screen ──
+let selectedCat = 'leicht';
+document.querySelectorAll('#screen-start .chip').forEach(chip => {
+  chip.addEventListener('click', () => {
+    selectedCat = chip.dataset.cat;
+    document.querySelectorAll('#screen-start .chip').forEach(c => c.classList.remove('active'));
+    chip.classList.add('active');
+    State.category = selectedCat;
+    log('Kategorie gewählt:', selectedCat);
+  });
+});
+
+// ── Lobby-Kategorie Chips ──
+document.querySelectorAll('#lobby-category-chips .chip').forEach(chip => {
+  chip.addEventListener('click', () => {
+    if (!State.isHost) return;
+    document.querySelectorAll('#lobby-category-chips .chip').forEach(c => c.classList.remove('active'));
+    chip.classList.add('active');
+    updateCategory(chip.dataset.cat);
+  });
+});
+
+// ── Slider Start-Screen ──
+const sliderStart = document.getElementById('slider-max-players');
+const sliderDisplay = document.getElementById('slider-val-display');
+if (sliderStart) {
+  sliderStart.addEventListener('input', () => {
+    sliderDisplay.textContent = sliderStart.value;
+    State.maxPlayers = parseInt(sliderStart.value, 10);
+    updateSliderFill(sliderStart);
+  });
+  updateSliderFill(sliderStart);
+}
+
+// ── URL-Parameter: Neue Lobby-Optionen ausblenden wenn Code vorhanden ──
+document.getElementById('input-lobby').addEventListener('input', () => {
+  const hasCode = document.getElementById('input-lobby').value.trim().length > 0;
+  document.getElementById('new-lobby-options').style.opacity = hasCode ? '0.4' : '1';
+});
+
+// ── Slider Lobby ──
+const sliderLobby = document.getElementById('lobby-slider-max');
+const sliderLobbyVal = document.getElementById('lobby-slider-val');
+if (sliderLobby) {
+  sliderLobby.addEventListener('input', () => {
+    sliderLobbyVal.textContent = sliderLobby.value;
+    updateSliderFill(sliderLobby);
+  });
+  sliderLobby.addEventListener('change', () => {
+    if (State.isHost) updateMaxPlayers(sliderLobby.value);
+  });
+  updateSliderFill(sliderLobby);
+}
+
+// ── Join-Button ──
+document.getElementById('btn-join').addEventListener('click', async () => {
+  const name  = document.getElementById('input-name').value.trim();
+  const code  = document.getElementById('input-lobby').value.trim().toUpperCase();
+  const errEl = document.getElementById('start-error');
+  errEl.textContent = '';
+
+  if (!name)     { errEl.textContent = 'Bitte gib deinen Namen ein.'; return; }
+  if (!State.db) { errEl.textContent = 'Firebase nicht verbunden.';   return; }
+
+  log('Join – Name:', name, '| Code:', code || '(neu)', '| Rolle:', selectedRole);
+
+  try {
+    State.uid  = getOrCreateUID();
+    State.name = name;
+    State.role = selectedRole;
+    await joinOrCreateLobby(name, code, selectedRole);
+    enterLobbyScreen();
+  } catch (e) {
+    log('Fehler:', e.message);
+    errEl.textContent = e.message;
+  }
+});
+
+// Enter-Tasten
+['input-name','input-lobby'].forEach(id => {
+  document.getElementById(id).addEventListener('keydown', e => {
+    if (e.key === 'Enter') document.getElementById('btn-join').click();
+  });
+});
+
+// Lobby-Code kopieren
+document.getElementById('btn-copy-code').addEventListener('click', () => {
+  const code = document.getElementById('lobby-code-display').textContent;
+  navigator.clipboard.writeText(code).then(() => {
+    showToast('📋 Code kopiert!');
+    document.getElementById('btn-copy-code').textContent = '✓';
+    setTimeout(() => document.getElementById('btn-copy-code').textContent = '⧉', 1500);
+  });
+});
+
+// Einlade-Buttons
+document.getElementById('btn-invite-link').addEventListener('click', copyInviteLink);
+document.getElementById('btn-invite-wa').addEventListener('click', shareWhatsApp);
+
+// Spiel starten
+document.getElementById('btn-start').addEventListener('click', startGame);
+
+// Hinweis
+document.getElementById('btn-submit-clue').addEventListener('click', submitClue);
+document.getElementById('input-clue').addEventListener('keydown', e => { if (e.key === 'Enter') submitClue(); });
+
+// Mod-Review bestätigen
+document.getElementById('btn-mod-confirm').addEventListener('click', confirmModReview);
+
+// Raten
+document.getElementById('btn-submit-guess').addEventListener('click', submitGuess);
+document.getElementById('input-guess').addEventListener('keydown', e => { if (e.key === 'Enter') submitGuess(); });
+
+// Verdikt (TV-Modus)
+document.getElementById('btn-verdict-correct').addEventListener('click', () => setVerdict(true));
+document.getElementById('btn-verdict-wrong').addEventListener('click',   () => setVerdict(false));
+
+// Nächste Runde / Beenden
+document.getElementById('btn-next-round').addEventListener('click', nextRound);
+document.getElementById('btn-end-game').addEventListener('click', endGame);
+
+// ══════════════════════════════════════════════════════════════
+//  INIT
+// ══════════════════════════════════════════════════════════════
+(async function init() {
+  log('Init');
+
+  const ok = initFirebase();
+  if (!ok) {
+    showScreen('start');
+    document.getElementById('start-error').textContent = 'Firebase-Fehler. Bitte neu laden.';
+    return;
+  }
+
+  State.uid = getOrCreateUID();
+
+  // Letzten Namen vorausfüllen
+  const savedName = loadSavedName();
+  if (savedName) document.getElementById('input-name').value = savedName;
+
+  // URL-Parameter ?lobby=CODE
+  const params = new URLSearchParams(window.location.search);
+  const lobbyParam = params.get('lobby');
+  if (lobbyParam) {
+    document.getElementById('input-lobby').value = lobbyParam.toUpperCase();
+    document.getElementById('new-lobby-options').style.opacity = '0.4';
+    showToast(`🎮 Lobby ${lobbyParam} – Namen eingeben und beitreten!`);
+  }
+
+  // Host-Reconnect (nur ohne URL-Parameter)
+  if (!lobbyParam) {
+    const reconnected = await checkHostReconnect(State.uid);
+    if (reconnected) return;
+  }
+
+  showScreen('start');
+})(); Object.entries(State.clues);
   const duplicates = findDuplicates(allEntries.map(([, t]) => t));
   log('Duplikate:', [...duplicates], '| Mod-Strikes:', Object.keys(State.modStrikes));
 
