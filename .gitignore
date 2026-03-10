@@ -1,0 +1,31 @@
+# Betriebssystem
+.DS_Store
+.DS_Store?
+._*
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Editor / IDE
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Logs
+*.log
+npm-debug.log*
+
+# Node (falls später npm-Tools genutzt werden)
+node_modules/
+package-lock.json
+
+# Lokale Konfigurationsdateien (Firebase-Config nicht ins Repo!)
+# Die Firebase-Konfiguration wird über den Browser localStorage gespeichert,
+# NICHT als Datei im Repository – das ist by design sicher.
+firebase-config.local.json
+.env
+.env.local

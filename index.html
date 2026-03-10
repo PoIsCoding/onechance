@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>One Chance – Das Ratespiel</title>
+  <meta name="description" content="One Chance – Das kooperative Multiplayer-Wort-Ratespiel" />
+
+  <!-- Google Fonts: Syne (Display) + DM Sans (Body) -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;700;800&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet" />
+
+  <!-- Firebase SDK (Realtime Database) -->
+  <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
+
+  <!-- Stylesheet aus assets/css/ -->
+  <link rel="stylesheet" href="assets/css/style.css" />
+</head>
+<body>
+
+  <!-- ════════════════════════════════════════════════
+       SCREEN 1 – START / JOIN
+  ════════════════════════════════════════════════ -->
+  <div id="screen-start" class="screen active">
+    <div class="bg-orbs">
+      <span class="orb orb1"></span>
+      <span class="orb orb2"></span>
+      <span class="orb orb3"></span>
+    </div>
+    <div class="card center-card">
+      <h1 class="logo">One<br/><em>Chance</em></h1>
+      <p class="tagline">Das kooperative Wort-Ratespiel</p>
+
+      <div class="field-group">
+        <input id="input-name" type="text" placeholder="Dein Name" maxlength="16" autocomplete="off" />
+      </div>
+
+      <div class="divider"><span>Lobby</span></div>
+
+      <div class="field-group">
+        <input id="input-lobby" type="text" placeholder="Lobby-Code (leer = neu erstellen)" maxlength="6" autocomplete="off" style="text-transform:uppercase" />
+      </div>
+
+      <button id="btn-join" class="btn-primary">Beitreten / Erstellen</button>
+      <p id="start-error" class="error-msg"></p>
+    </div>
+  </div>
+
+  <!-- ════════════════════════════════════════════════
+       SCREEN 2 – LOBBY
+  ════════════════════════════════════════════════ -->
+  <div id="screen-lobby" class="screen">
+    <div class="bg-orbs">
+      <span class="orb orb1"></span>
+      <span class="orb orb2"></span>
+    </div>
+    <div class="card lobby-card">
+      <div class="lobby-header">
+        <h2>Lobby</h2>
+        <div class="lobby-code-box">
+          <span id="lobby-code-display">----</span>
+          <button id="btn-copy-code" class="btn-copy" title="Code kopieren">⧉</button>
+        </div>
+      </div>
+      <p class="lobby-subtitle">Teile den Code mit deinen Mitspielern!</p>
+
+      <ul id="player-list" class="player-list"></ul>
+
+      <div id="host-controls" class="host-controls hidden">
+        <p id="host-hint" class="host-hint">Mindestens 3 Spieler werden benötigt.</p>
+        <button id="btn-start" class="btn-primary" disabled>Spiel starten</button>
+      </div>
+      <p id="waiting-msg" class="waiting-msg">Warte auf den Host…</p>
+    </div>
+  </div>
+
+  <!-- ════════════════════════════════════════════════
+       SCREEN 3 – HINWEIS GEBEN (Wortgeber)
+  ════════════════════════════════════════════════ -->
+  <div id="screen-clue" class="screen">
+    <div class="bg-orbs">
+      <span class="orb orb1"></span>
+      <span class="orb orb2"></span>
+    </div>
+    <div class="card clue-card">
+      <p class="role-badge">Wortgeber</p>
+      <p class="round-label">Das gesuchte Wort ist:</p>
+      <div class="secret-word-box">
+        <span id="secret-word-display">—</span>
+      </div>
+      <p class="clue-instruction">Gib einen einzigen Hinweis-Begriff ein:</p>
+      <div class="field-group">
+        <input id="input-clue" type="text" placeholder="Dein Hinweis…" maxlength="30" autocomplete="off" />
+      </div>
+      <button id="btn-submit-clue" class="btn-primary">Bestätigen</button>
+      <p id="clue-submitted-msg" class="success-msg hidden">✓ Hinweis abgeschickt! Warte auf die anderen…</p>
+    </div>
+  </div>
+
+  <!-- ════════════════════════════════════════════════
+       SCREEN 4 – WARTEN (Rater sieht nur das)
+  ════════════════════════════════════════════════ -->
+  <div id="screen-guesser-wait" class="screen">
+    <div class="bg-orbs">
+      <span class="orb orb1"></span>
+    </div>
+    <div class="card center-card">
+      <p class="role-badge rater">Rater</p>
+      <h2 class="wait-title">Die anderen denken nach…</h2>
+      <div class="spinner"></div>
+      <p class="wait-sub">Du bekommst gleich deine Hinweise!</p>
+    </div>
+  </div>
+
+  <!-- ════════════════════════════════════════════════
+       SCREEN 5 – HINWEISE ANZEIGEN & DOPPELTE STREICHEN
+  ════════════════════════════════════════════════ -->
+  <div id="screen-reveal" class="screen">
+    <div class="bg-orbs">
+      <span class="orb orb1"></span>
+      <span class="orb orb2"></span>
+    </div>
+    <div class="card reveal-card">
+      <p class="round-label">Hinweise für den Rater</p>
+      <p class="reveal-sub">Doppelte Begriffe werden gestrichen…</p>
+      <ul id="clue-list" class="clue-list"></ul>
+      <button id="btn-to-guess" class="btn-primary hidden">Raten lassen!</button>
+    </div>
+  </div>
+
+  <!-- ════════════════════════════════════════════════
+       SCREEN 6 – RATEN
+  ════════════════════════════════════════════════ -->
+  <div id="screen-guess" class="screen">
+    <div class="bg-orbs">
+      <span class="orb orb1"></span>
+      <span class="orb orb2"></span>
+    </div>
+    <div class="card clue-card">
+      <p class="role-badge rater">Rater</p>
+      <p class="round-label">Deine Hinweise:</p>
+      <ul id="guesser-clue-list" class="clue-list-inline"></ul>
+      <p class="clue-instruction">Was ist das gesuchte Wort?</p>
+      <div class="field-group">
+        <input id="input-guess" type="text" placeholder="Deine Antwort…" maxlength="30" autocomplete="off" />
+      </div>
+      <button id="btn-submit-guess" class="btn-primary">Antwort abgeben</button>
+    </div>
+  </div>
+
+  <!-- ════════════════════════════════════════════════
+       SCREEN 7 – ERGEBNIS
+  ════════════════════════════════════════════════ -->
+  <div id="screen-result" class="screen">
+    <div class="bg-orbs">
+      <span class="orb orb1"></span>
+      <span class="orb orb2"></span>
+      <span class="orb orb3"></span>
+    </div>
+    <div class="card result-card">
+      <div id="result-icon" class="result-icon">🎉</div>
+      <h2 id="result-title" class="result-title">Richtig!</h2>
+      <p id="result-guess" class="result-guess"></p>
+      <p id="result-word" class="result-word"></p>
+      <div id="host-next-controls" class="host-controls hidden">
+        <button id="btn-next-round" class="btn-primary">Nächste Runde</button>
+        <button id="btn-end-game"   class="btn-secondary">Spiel beenden</button>
+      </div>
+      <p id="waiting-next-msg" class="waiting-msg">Warte auf den Host…</p>
+    </div>
+  </div>
+
+  <!-- Firebase-Konfiguration ist fest in assets/js/game.js eingebunden -->
+
+  <!-- Spiellogik aus assets/js/ -->
+  <script src="assets/js/game.js"></script>
+</body>
+</html>
