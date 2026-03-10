@@ -5,17 +5,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>One Chance – Das Ratespiel</title>
   <meta name="description" content="One Chance – Das kooperative Multiplayer-Wort-Ratespiel" />
-
-  <!-- Google Fonts: Syne (Display) + DM Sans (Body) -->
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;700;800&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet" />
-
-  <!-- Firebase SDK (Realtime Database) -->
   <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
-
-  <!-- Stylesheet aus assets/css/ -->
   <link rel="stylesheet" href="assets/css/style.css" />
 </head>
 <body>
@@ -43,6 +37,20 @@
         <input id="input-lobby" type="text" placeholder="Lobby-Code (leer = neu erstellen)" maxlength="6" autocomplete="off" style="text-transform:uppercase" />
       </div>
 
+      <!-- Spieler-Limit-Auswahl – nur sinnvoll bei neuer Lobby -->
+      <div class="field-group limit-group">
+        <label for="select-max-players-start" class="limit-label">Max. Spieler (neue Lobby):</label>
+        <select id="select-max-players-start" class="select-limit">
+          <option value="3">3</option>
+          <option value="4">4</option>
+          <option value="5">5</option>
+          <option value="6">6</option>
+          <option value="8" selected>8</option>
+          <option value="10">10</option>
+          <option value="12">12</option>
+        </select>
+      </div>
+
       <button id="btn-join" class="btn-primary">Beitreten / Erstellen</button>
       <p id="start-error" class="error-msg"></p>
     </div>
@@ -57,6 +65,8 @@
       <span class="orb orb2"></span>
     </div>
     <div class="card lobby-card">
+
+      <!-- Header: Code + Spielerzähler -->
       <div class="lobby-header">
         <h2>Lobby</h2>
         <div class="lobby-code-box">
@@ -64,14 +74,47 @@
           <button id="btn-copy-code" class="btn-copy" title="Code kopieren">⧉</button>
         </div>
       </div>
-      <p class="lobby-subtitle">Teile den Code mit deinen Mitspielern!</p>
 
+      <!-- Spielerzähler + Limit-Info -->
+      <p class="lobby-subtitle">
+        Spieler: <strong id="player-count">0 / 8</strong>
+        &nbsp;·&nbsp;
+        <span id="limit-display"></span>
+      </p>
+
+      <!-- Spielerliste (inkl. Kick-Buttons für Host) -->
       <ul id="player-list" class="player-list"></ul>
 
+      <!-- ── Einlade-Bereich (für alle sichtbar) ── -->
+      <div id="invite-area" class="invite-area hidden">
+        <p class="invite-label">Mitspieler einladen:</p>
+        <div class="invite-buttons">
+          <button id="btn-invite-link" class="btn-invite">🔗 Link kopieren</button>
+          <button id="btn-invite-wa"   class="btn-invite btn-wa">WhatsApp</button>
+        </div>
+      </div>
+
+      <!-- ── Host-Controls ── -->
       <div id="host-controls" class="host-controls hidden">
+
+        <!-- Spieler-Limit anpassen -->
+        <div class="host-limit-row">
+          <label for="select-max-players" class="limit-label">Spieler-Limit:</label>
+          <select id="select-max-players" class="select-limit">
+            <option value="3">3</option>
+            <option value="4">4</option>
+            <option value="5">5</option>
+            <option value="6">6</option>
+            <option value="8" selected>8</option>
+            <option value="10">10</option>
+            <option value="12">12</option>
+          </select>
+        </div>
+
         <p id="host-hint" class="host-hint">Mindestens 3 Spieler werden benötigt.</p>
         <button id="btn-start" class="btn-primary" disabled>Spiel starten</button>
       </div>
+
       <p id="waiting-msg" class="waiting-msg">Warte auf den Host…</p>
     </div>
   </div>
@@ -100,7 +143,7 @@
   </div>
 
   <!-- ════════════════════════════════════════════════
-       SCREEN 4 – WARTEN (Rater sieht nur das)
+       SCREEN 4 – WARTEN (Rater)
   ════════════════════════════════════════════════ -->
   <div id="screen-guesser-wait" class="screen">
     <div class="bg-orbs">
@@ -115,7 +158,7 @@
   </div>
 
   <!-- ════════════════════════════════════════════════
-       SCREEN 5 – HINWEISE ANZEIGEN & DOPPELTE STREICHEN
+       SCREEN 5 – REVEAL (Doppelte streichen)
   ════════════════════════════════════════════════ -->
   <div id="screen-reveal" class="screen">
     <div class="bg-orbs">
@@ -163,7 +206,7 @@
       <div id="result-icon" class="result-icon">🎉</div>
       <h2 id="result-title" class="result-title">Richtig!</h2>
       <p id="result-guess" class="result-guess"></p>
-      <p id="result-word" class="result-word"></p>
+      <p id="result-word"  class="result-word"></p>
       <div id="host-next-controls" class="host-controls hidden">
         <button id="btn-next-round" class="btn-primary">Nächste Runde</button>
         <button id="btn-end-game"   class="btn-secondary">Spiel beenden</button>
@@ -172,9 +215,6 @@
     </div>
   </div>
 
-  <!-- Firebase-Konfiguration ist fest in assets/js/game.js eingebunden -->
-
-  <!-- Spiellogik aus assets/js/ -->
   <script src="assets/js/game.js"></script>
 </body>
 </html>

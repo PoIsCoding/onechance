@@ -5,6 +5,34 @@ Format: [Semantische Versionierung](https://semver.org/lang/de/) `vMAJOR.MINOR.P
 
 ---
 
+## [v1.3.0] – 2025-XX-XX
+
+### Neu
+- **Host-Reconnect**: UID wird in `localStorage` gespeichert (statt `sessionStorage`).
+  Beim Seitenaufruf wird geprüft ob noch eine aktive Host-Lobby existiert – falls ja,
+  kehrt der Host automatisch zur Lobby zurück ohne neu beitreten zu müssen.
+- **Spieler-Limit**: Host kann die maximale Spieleranzahl (3–12) festlegen –
+  sowohl beim Erstellen einer Lobby (Start-Screen) als auch danach in der Lobby.
+  Beitrittsversuche über dem Limit werden mit Fehlermeldung blockiert.
+- **Spieler kicken**: Host sieht neben jedem Spieler einen ✕-Button.
+  Gekickte Spieler werden in `/kicked/` eingetragen, erhalten sofort einen
+  Toast-Hinweis und landen auf dem Start-Screen.
+- **Einlade-Link**: Generiert einen direkten URL mit `?lobby=CODE`.
+  Button zum Kopieren + WhatsApp-Teilen-Button in der Lobby.
+  Beim Öffnen des Links wird der Code automatisch ins Beitrittsfeld eingetragen.
+- **Toast-Benachrichtigungen**: Kurze animierte Einblendungen für Systemereignisse
+  (Kick, Reconnect, Link kopiert, Limit gesetzt).
+- **Letzter Name**: Wird in `localStorage` gespeichert und beim nächsten Start vorausgefüllt.
+- **Spielerzähler**: Zeigt `X / Limit` in der Lobby-Überschrift.
+- **Ich-Badge**: Spieler sehen ihr eigenes Profil in der Liste mit „Du"-Markierung.
+
+### Geändert
+- `getOrCreateUID()` nutzt jetzt `localStorage` statt `sessionStorage`
+- `enterLobbyScreen()` ruft `removeAllListeners()` auf (verhindert doppelte Listener bei Rundenende)
+- `watchForResult()` als eigenständiger Listener statt separater Funktion konsolidiert
+
+---
+
 ## [v1.2.0] – 2025-XX-XX
 
 ### Geändert

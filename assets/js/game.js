@@ -8,23 +8,37 @@
  *  - Lobby-System mit zufälligem 6-stelligen Code
  *  - Spielphasen: lobby → clue → reveal → guess → result
  *
+ *  Neu in v1.3.0:
+ *  - Host-Reconnect: UID liegt in localStorage (überlebt Reload).
+ *    Beim Seitenaufruf wird geprüft ob noch eine Host-Lobby aktiv
+ *    ist – falls ja, kehrt der Host automatisch zurück.
+ *  - Spieler-Limit: Host kann max. Spieleranzahl (3–12) setzen.
+ *    Beitrittsversuche über dem Limit werden blockiert.
+ *  - Spieler kicken: Host sieht ✕-Button neben jedem Spieler.
+ *    Gekickte Spieler werden zur kicked/-Liste hinzugefügt und
+ *    sehen sofort den Start-Screen mit Hinweis.
+ *  - Einlade-Link: Generiert URL mit ?lobby=CODE. WhatsApp-Teilen.
+ *    Beim Öffnen wird der Code automatisch vorausgefüllt.
+ *
  *  Datenbankstruktur:
  *  /lobbies/{code}/
- *    ├── host:        string        (UID des Hosts)
- *    ├── phase:       string        (lobby|clue|reveal|guess|result)
- *    ├── secretWord:  string        (gesuchtes Wort)
- *    ├── guesserUID:  string        (wer rät)
- *    ├── guess:       string        (Antwort des Raters)
+ *    ├── host:        string          (UID des Hosts)
+ *    ├── phase:       string          (lobby|clue|reveal|guess|result)
+ *    ├── maxPlayers:  number          (Spieler-Limit, default 8)
+ *    ├── secretWord:  string
+ *    ├── guesserUID:  string
+ *    ├── guess:       string
+ *    ├── kicked/
+ *    │   └── {uid}: true             (gekickte UIDs)
  *    ├── players/
  *    │   └── {uid}: { name, ready }
  *    └── clues/
- *        └── {uid}: string         (Hinweis jedes Wortgebers)
+ *        └── {uid}: string
  *
  * ═══════════════════════════════════════════════════════════════
  */
 
-// ── Logger-Hilfsfunktion ──────────────────────────────────────
-// Einheitliches Logging mit Zeitstempel und Präfix
+// ── Logger ────────────────────────────────────────────────────
 function log(message, data = null) {
   const ts = new Date().toLocaleTimeString('de-AT');
   if (data !== null) {
@@ -37,64 +51,73 @@ function log(message, data = null) {
 log('Skript geladen – initialisiere Spielumgebung');
 
 // ── Wortliste ─────────────────────────────────────────────────
-// Vielfältige, gut ratbare Begriffe auf Deutsch
 const WORD_LIST = [
   'Strand','Wolke','Gitarre','Drache','Elefant','Vulkan',
   'Pyramide','Kompass','Tintenfisch','Laterne','Schiff',
   'Kristall','Wüste','Bibliothek','Feuerwerk','Igel','Ballon',
-  'Leuchtturm','Ozeam','Zauberer','Tornado','Brücke','Nostalgie',
+  'Leuchtturm','Ozean','Zauberer','Tornado','Brücke','Nostalgie',
   'Safari','Pinguin','Mondschein','Kamin','Ninja','Wasserfall',
   'Rucksack','Dschungel','Labyrinth','Schatzkarte','Geysir',
   'Wetterfahne','Sternschnuppe','Fischmarkt','Kletterwand',
   'Sandburg','Thermoskanne','Zeitkapsel','Sonnenuhr','Gondel',
   'Wildnis','Kaleidoskop','Trampolin','Höhlenmalerei','Zirkus',
-  'Boomerang','Kolosseum','Mangrove','Eisberg','Karawane'
+  'Boomerang','Kolosseum','Mangrove','Eisberg','Karawane',
 ];
 
 // ── Spielzustand ──────────────────────────────────────────────
 const State = {
-  uid:         null,   // Eindeutige User-ID dieser Browser-Session
-  name:        null,   // Spielername
-  lobbyCode:   null,   // Aktueller Lobby-Code
-  isHost:      false,  // Ist dieser Spieler der Host?
-  isGuesser:   false,  // Ist dieser Spieler der Rater?
-  phase:       null,   // Aktuelle Spielphase
-  secretWord:  null,   // Das gesuchte Wort
-  guesserUID:  null,   // UID des Raters
-  players:     {},     // { uid: { name, ready } }
-  clues:       {},     // { uid: clueText }
-  db:          null,   // Firebase Database-Referenz
-  listeners:   [],     // Aktive Firebase-Listener (zum Aufräumen)
+  uid:         null,
+  name:        null,
+  lobbyCode:   null,
+  isHost:      false,
+  isGuesser:   false,
+  phase:       null,
+  secretWord:  null,
+  guesserUID:  null,
+  maxPlayers:  8,
+  players:     {},
+  clues:       {},
+  db:          null,
+  listeners:   [],
 };
 
 // ── DOM-Referenzen ────────────────────────────────────────────
 const screens = {
-  start:        document.getElementById('screen-start'),
-  lobby:        document.getElementById('screen-lobby'),
-  clue:         document.getElementById('screen-clue'),
-  guesserWait:  document.getElementById('screen-guesser-wait'),
-  reveal:       document.getElementById('screen-reveal'),
-  guess:        document.getElementById('screen-guess'),
-  result:       document.getElementById('screen-result'),
+  start:       document.getElementById('screen-start'),
+  lobby:       document.getElementById('screen-lobby'),
+  clue:        document.getElementById('screen-clue'),
+  guesserWait: document.getElementById('screen-guesser-wait'),
+  reveal:      document.getElementById('screen-reveal'),
+  guess:       document.getElementById('screen-guess'),
+  result:      document.getElementById('screen-result'),
 };
 
-// ── Einmalige User-ID generieren ──────────────────────────────
-// Wird im sessionStorage gespeichert, damit Browser-Reload sicher ist
+// ══════════════════════════════════════════════════════════════
+//  USER-ID & NAME (localStorage – überlebt Seiten-Reload)
+// ══════════════════════════════════════════════════════════════
+
 function getOrCreateUID() {
-  let uid = sessionStorage.getItem('onechance_uid');
+  let uid = localStorage.getItem('onechance_uid');
   if (!uid) {
     uid = 'u_' + Math.random().toString(36).slice(2, 11);
-    sessionStorage.setItem('onechance_uid', uid);
+    localStorage.setItem('onechance_uid', uid);
     log('Neue UID erstellt:', uid);
   } else {
-    log('Bestehende UID geladen:', uid);
+    log('UID aus localStorage:', uid);
   }
   return uid;
 }
 
+function loadSavedName() {
+  return localStorage.getItem('onechance_name') || '';
+}
+
+function saveName(name) {
+  localStorage.setItem('onechance_name', name);
+}
+
 // ══════════════════════════════════════════════════════════════
-//  FIREBASE KONFIGURATION (fest eingebaut)
-//  databaseURL kommt aus der Realtime Database in Firebase Console
+//  FIREBASE KONFIGURATION
 // ══════════════════════════════════════════════════════════════
 
 const FIREBASE_CONFIG = {
@@ -108,19 +131,17 @@ const FIREBASE_CONFIG = {
   measurementId:     "G-H820F9L3JY",
 };
 
-// Firebase initialisieren und Datenbankverbindung herstellen
 function initFirebase() {
   try {
-    // Verhindert Doppel-Initialisierung bei Page-Reloads
     if (firebase.apps.length === 0) {
       firebase.initializeApp(FIREBASE_CONFIG);
-      log('Firebase-App initialisiert');
+      log('Firebase initialisiert');
     }
     State.db = firebase.database();
-    log('Firebase Realtime Database verbunden:', FIREBASE_CONFIG.databaseURL);
+    log('Realtime Database verbunden');
     return true;
   } catch (e) {
-    log('Firebase-Initialisierung fehlgeschlagen:', e);
+    log('Firebase-Fehler:', e);
     return false;
   }
 }
@@ -129,26 +150,42 @@ function initFirebase() {
 //  SCREEN-MANAGER
 // ══════════════════════════════════════════════════════════════
 
-// Nur den gewünschten Screen einblenden, alle anderen ausblenden
 function showScreen(name) {
-  log('Screen wechseln zu:', name);
+  log('Screen:', name);
   Object.entries(screens).forEach(([key, el]) => {
     el.classList.toggle('active', key === name);
   });
 }
 
 // ══════════════════════════════════════════════════════════════
+//  TOAST-BENACHRICHTIGUNG
+// ══════════════════════════════════════════════════════════════
+
+function showToast(message, duration = 3000) {
+  log('Toast:', message);
+  let toast = document.getElementById('oc-toast');
+  if (!toast) {
+    toast = document.createElement('div');
+    toast.id = 'oc-toast';
+    document.body.appendChild(toast);
+  }
+  toast.textContent = message;
+  toast.classList.add('show');
+  clearTimeout(toast._timer);
+  toast._timer = setTimeout(() => toast.classList.remove('show'), duration);
+}
+
+// ══════════════════════════════════════════════════════════════
 //  LOBBY-CODE GENERATOR
 // ══════════════════════════════════════════════════════════════
 
-// 6-stelligen alphanumerischen Code generieren (nur Großbuchstaben + Ziffern)
 function generateLobbyCode() {
-  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // Verwechslungsfreie Zeichen
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   let code = '';
   for (let i = 0; i < 6; i++) {
     code += chars[Math.floor(Math.random() * chars.length)];
   }
-  log('Lobby-Code generiert:', code);
+  log('Code generiert:', code);
   return code;
 }
 
@@ -156,19 +193,139 @@ function generateLobbyCode() {
 //  FIREBASE LISTENER MANAGEMENT
 // ══════════════════════════════════════════════════════════════
 
-// Alle aktiven Firebase-Listener sauber entfernen
 function removeAllListeners() {
-  log(`${State.listeners.length} Firebase-Listener werden entfernt`);
-  State.listeners.forEach(({ ref, event, fn }) => {
-    ref.off(event, fn);
-  });
+  log(`${State.listeners.length} Listener entfernen`);
+  State.listeners.forEach(({ ref, event, fn }) => ref.off(event, fn));
   State.listeners = [];
 }
 
-// Neuen Listener registrieren und in Liste aufnehmen
 function addListener(ref, event, fn) {
   ref.on(event, fn);
   State.listeners.push({ ref, event, fn });
+}
+
+// ══════════════════════════════════════════════════════════════
+//  HOST-RECONNECT
+//  Beim Start prüfen ob der User noch eine aktive Host-Lobby hat.
+//  Der Lobby-Code wird in localStorage gespeichert wenn eine neue
+//  Lobby erstellt wird und beim Beenden wieder gelöscht.
+// ══════════════════════════════════════════════════════════════
+
+async function checkHostReconnect(uid) {
+  log('Host-Reconnect-Prüfung für UID:', uid);
+
+  const savedCode = localStorage.getItem('onechance_lobby');
+  if (!savedCode) {
+    log('Kein gespeicherter Lobby-Code');
+    return false;
+  }
+
+  log('Gespeicherter Code:', savedCode);
+
+  try {
+    const snap = await State.db.ref(`lobbies/${savedCode}`).once('value');
+
+    if (!snap.exists()) {
+      log('Lobby existiert nicht mehr – bereinige localStorage');
+      localStorage.removeItem('onechance_lobby');
+      return false;
+    }
+
+    const data = snap.val();
+
+    if (data.host !== uid) {
+      log('User ist nicht (mehr) Host dieser Lobby');
+      localStorage.removeItem('onechance_lobby');
+      return false;
+    }
+
+    log('Reconnect erfolgreich! Lobby:', savedCode);
+
+    // Spieler-Eintrag erneuern (war evtl. beim Schließen gelöscht worden)
+    const savedName = loadSavedName() || 'Host';
+    await State.db.ref(`lobbies/${savedCode}/players/${uid}`).set({
+      name:  savedName,
+      ready: false,
+    });
+
+    State.lobbyCode  = savedCode;
+    State.isHost     = true;
+    State.name       = savedName;
+    State.maxPlayers = data.maxPlayers || 8;
+
+    showToast('🔄 Als Host wiederverbunden!');
+    enterLobbyScreen();
+    return true;
+
+  } catch (e) {
+    log('Reconnect-Fehler:', e);
+    return false;
+  }
+}
+
+// ══════════════════════════════════════════════════════════════
+//  EINLADE-LINK
+// ══════════════════════════════════════════════════════════════
+
+function generateInviteLink(code) {
+  const base = window.location.href.split('?')[0].split('#')[0];
+  return `${base}?lobby=${code}`;
+}
+
+function copyInviteLink() {
+  const link = generateInviteLink(State.lobbyCode);
+  navigator.clipboard.writeText(link).then(() => {
+    log('Einlade-Link kopiert:', link);
+    showToast('🔗 Link kopiert!');
+    const btn = document.getElementById('btn-invite-link');
+    btn.textContent = '✓ Kopiert!';
+    setTimeout(() => btn.textContent = '🔗 Link kopieren', 2000);
+  }).catch(() => {
+    // Fallback: Prompt öffnen
+    prompt('Link manuell kopieren:', link);
+  });
+}
+
+function shareWhatsApp() {
+  const link = generateInviteLink(State.lobbyCode);
+  const text = encodeURIComponent(
+    `Komm in meine One Chance Lobby!\nCode: ${State.lobbyCode}\n${link}`
+  );
+  window.open(`https://wa.me/?text=${text}`, '_blank');
+  log('WhatsApp-Teilen geöffnet');
+}
+
+// ══════════════════════════════════════════════════════════════
+//  SPIELER KICKEN (nur Host)
+// ══════════════════════════════════════════════════════════════
+
+async function kickPlayer(uid) {
+  const playerName = State.players[uid]?.name || 'Spieler';
+  log('Kick:', playerName, uid);
+
+  try {
+    // 1. Kick-Eintrag setzen → Client erkennt dies und verlässt Lobby
+    await State.db.ref(`lobbies/${State.lobbyCode}/kicked/${uid}`).set(true);
+    // 2. Spieler aus Spielerliste entfernen
+    await State.db.ref(`lobbies/${State.lobbyCode}/players/${uid}`).remove();
+
+    log('Spieler gekickt:', playerName);
+    showToast(`🚫 ${playerName} wurde entfernt.`);
+  } catch (e) {
+    log('Kick-Fehler:', e);
+  }
+}
+
+// ══════════════════════════════════════════════════════════════
+//  SPIELER-LIMIT SETZEN (nur Host)
+// ══════════════════════════════════════════════════════════════
+
+async function updateMaxPlayers(newLimit) {
+  const limit = parseInt(newLimit, 10);
+  State.maxPlayers = limit;
+  log('Spieler-Limit:', limit);
+  await State.db.ref(`lobbies/${State.lobbyCode}/maxPlayers`).set(limit);
+  showToast(`👥 Limit: ${limit} Spieler`);
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -176,133 +333,209 @@ function addListener(ref, event, fn) {
 // ══════════════════════════════════════════════════════════════
 
 async function joinOrCreateLobby(name, code) {
-  log('Lobby beitreten/erstellen – Name:', name, 'Code:', code || '(neu)');
-
+  log('joinOrCreateLobby – Name:', name, '| Code:', code || '(neu)');
   const db = State.db;
 
   if (code) {
     // ── Bestehendes Lobby beitreten ──
-    const lobbyRef = db.ref(`lobbies/${code}`);
-    const snap = await lobbyRef.once('value');
-
-    if (!snap.exists()) {
-      log('Lobby nicht gefunden:', code);
-      throw new Error('Lobby nicht gefunden. Überprüfe den Code.');
-    }
+    const snap = await db.ref(`lobbies/${code}`).once('value');
+    if (!snap.exists()) throw new Error('Lobby nicht gefunden. Überprüfe den Code.');
 
     const data = snap.val();
-    if (data.phase !== 'lobby') {
-      throw new Error('Das Spiel hat bereits begonnen.');
+    if (data.phase !== 'lobby') throw new Error('Das Spiel hat bereits begonnen.');
+
+    // Wurde dieser User gekickt?
+    const kicked = data.kicked || {};
+    if (kicked[State.uid]) throw new Error('Du wurdest aus dieser Lobby entfernt.');
+
+    // Spieler-Limit prüfen (Rejoin zählt nicht als neuer Slot)
+    const currentCount = Object.keys(data.players || {}).length;
+    const limit        = data.maxPlayers || 8;
+    const isRejoin     = !!(data.players && data.players[State.uid]);
+    if (!isRejoin && currentCount >= limit) {
+      throw new Error(`Die Lobby ist voll (max. ${limit} Spieler).`);
     }
 
-    // Spieler eintragen
-    await db.ref(`lobbies/${code}/players/${State.uid}`).set({
-      name: name,
-      ready: false,
-    });
+    await db.ref(`lobbies/${code}/players/${State.uid}`).set({ name, ready: false });
 
-    State.lobbyCode = code;
-    State.isHost    = false;
-    log('Lobby beigetreten:', code);
+    State.lobbyCode  = code;
+    State.isHost     = (data.host === State.uid);
+    State.maxPlayers = limit;
+    log('Beigetreten:', code, '| isHost:', State.isHost);
+
   } else {
     // ── Neue Lobby erstellen ──
     const newCode = generateLobbyCode();
     await db.ref(`lobbies/${newCode}`).set({
       host:       State.uid,
       phase:      'lobby',
+      maxPlayers: State.maxPlayers,
       secretWord: null,
       guesserUID: null,
       guess:      null,
-      players: {
-        [State.uid]: { name: name, ready: false }
-      },
-      clues: {},
+      kicked:     {},
+      players:    { [State.uid]: { name, ready: false } },
+      clues:      {},
     });
 
     State.lobbyCode = newCode;
     State.isHost    = true;
-    log('Neue Lobby erstellt:', newCode);
+
+    // Lobby-Code für Host-Reconnect in localStorage speichern
+    localStorage.setItem('onechance_lobby', newCode);
+    log('Neue Lobby erstellt:', newCode, '| Limit:', State.maxPlayers);
   }
 
-  // Cleanup-Hook: Spieler beim Tab-Schließen entfernen
+  saveName(name);
+
+  // Beim Tab-Schließen: Nur Gäste entfernen sich automatisch.
+  // Der Host-Eintrag bleibt für Reconnect.
   window.addEventListener('beforeunload', () => {
-    db.ref(`lobbies/${State.lobbyCode}/players/${State.uid}`).remove();
+    if (!State.isHost) {
+      db.ref(`lobbies/${State.lobbyCode}/players/${State.uid}`).remove();
+    }
   });
 }
 
 // ══════════════════════════════════════════════════════════════
-//  LOBBY-SCREEN: Spielerliste & Phasenwatcher
+//  LOBBY-SCREEN
 // ══════════════════════════════════════════════════════════════
 
 function enterLobbyScreen() {
-  log('Lobby-Screen betreten – Code:', State.lobbyCode);
+  log('Lobby-Screen – Code:', State.lobbyCode, '| isHost:', State.isHost);
 
-  // Lobby-Code anzeigen
+  removeAllListeners(); // Doppelte Listener verhindern
+
   document.getElementById('lobby-code-display').textContent = State.lobbyCode;
 
-  // Host-Controls vs. Wartetext
   const hostControls = document.getElementById('host-controls');
   const waitingMsg   = document.getElementById('waiting-msg');
+  const inviteArea   = document.getElementById('invite-area');
+  const limitDisplay = document.getElementById('limit-display');
+
   if (State.isHost) {
     hostControls.classList.remove('hidden');
     waitingMsg.classList.add('hidden');
+    // Limit-Dropdown auf aktuellen Wert setzen
+    const sel = document.getElementById('select-max-players');
+    if (sel) sel.value = String(State.maxPlayers);
   } else {
     hostControls.classList.add('hidden');
     waitingMsg.classList.remove('hidden');
   }
 
-  // ── Spielerliste live beobachten ──
-  const playersRef = State.db.ref(`lobbies/${State.lobbyCode}/players`);
-  addListener(playersRef, 'value', (snap) => {
-    State.players = snap.val() || {};
-    log('Spielerliste aktualisiert:', Object.keys(State.players).length, 'Spieler');
-    renderPlayerList();
-    updateStartButton();
-  });
+  // Einlade-Bereich für alle sichtbar
+  if (inviteArea) inviteArea.classList.remove('hidden');
 
-  // ── Phasenwechsel beobachten ──
-  const phaseRef = State.db.ref(`lobbies/${State.lobbyCode}/phase`);
-  addListener(phaseRef, 'value', (snap) => {
-    const phase = snap.val();
-    log('Phase geändert:', phase);
-    if (phase && phase !== 'lobby') {
-      handlePhaseChange(phase);
+  // ── Kicked-Listener: Prüfen ob DIESER User rausgeworfen wurde ──
+  const kickedRef = State.db.ref(`lobbies/${State.lobbyCode}/kicked/${State.uid}`);
+  addListener(kickedRef, 'value', (snap) => {
+    if (snap.val() === true) {
+      log('Dieser Spieler wurde gekickt');
+      removeAllListeners();
+      localStorage.removeItem('onechance_lobby');
+      State.lobbyCode = null;
+      State.isHost    = false;
+      showScreen('start');
+      showToast('🚫 Du wurdest aus der Lobby entfernt.');
     }
   });
+
+  // ── Spielerliste live ──
+  addListener(
+    State.db.ref(`lobbies/${State.lobbyCode}/players`),
+    'value',
+    (snap) => {
+      State.players = snap.val() || {};
+      log('Spieler:', Object.keys(State.players).length);
+      renderPlayerList();
+      updateStartButton();
+    }
+  );
+
+  // ── Spieler-Limit live beobachten (für Gäste) ──
+  addListener(
+    State.db.ref(`lobbies/${State.lobbyCode}/maxPlayers`),
+    'value',
+    (snap) => {
+      const limit = snap.val();
+      if (limit) {
+        State.maxPlayers = limit;
+        if (limitDisplay) limitDisplay.textContent = `Max. ${limit} Spieler`;
+      }
+    }
+  );
+
+  // ── Phasenwechsel ──
+  addListener(
+    State.db.ref(`lobbies/${State.lobbyCode}/phase`),
+    'value',
+    (snap) => {
+      const phase = snap.val();
+      log('Phase:', phase);
+      if (phase && phase !== 'lobby') handlePhaseChange(phase);
+    }
+  );
 
   showScreen('lobby');
 }
 
-// Spielerliste im DOM rendern
+// ── Spielerliste rendern ──────────────────────────────────────
 function renderPlayerList() {
   const list = document.getElementById('player-list');
   list.innerHTML = '';
 
-  // Host-UID aus Datenbank holen (ist beim ersten Render verfügbar)
   State.db.ref(`lobbies/${State.lobbyCode}/host`).once('value').then(snap => {
-    const hostUID = snap.val();
+    const dbHostUID = snap.val();
+    const count     = Object.keys(State.players).length;
+
+    // Spielerzähler
+    const counter = document.getElementById('player-count');
+    if (counter) counter.textContent = `${count} / ${State.maxPlayers}`;
 
     Object.entries(State.players).forEach(([uid, player]) => {
       const li = document.createElement('li');
 
-      // Avatar mit Initial
+      // Avatar
       const avatar = document.createElement('div');
-      avatar.className = 'player-avatar';
+      avatar.className   = 'player-avatar';
       avatar.textContent = (player.name || '?')[0].toUpperCase();
 
       const nameEl = document.createElement('span');
-      nameEl.className = 'player-name';
+      nameEl.className   = 'player-name';
       nameEl.textContent = player.name;
 
       li.appendChild(avatar);
       li.appendChild(nameEl);
 
-      // Host-Abzeichen
-      if (uid === hostUID) {
+      // Host-Badge
+      if (uid === dbHostUID) {
         const badge = document.createElement('span');
-        badge.className = 'host-badge';
+        badge.className   = 'host-badge';
         badge.textContent = 'HOST';
         li.appendChild(badge);
+      }
+
+      // Ich-Badge (für Gäste)
+      if (uid === State.uid && uid !== dbHostUID) {
+        const meBadge = document.createElement('span');
+        meBadge.className   = 'me-badge';
+        meBadge.textContent = 'Du';
+        li.appendChild(meBadge);
+      }
+
+      // Kick-Button: nur für Host, nicht für sich selbst
+      if (State.isHost && uid !== State.uid) {
+        const kickBtn = document.createElement('button');
+        kickBtn.className   = 'btn-kick';
+        kickBtn.title       = `${player.name} entfernen`;
+        kickBtn.textContent = '✕';
+        kickBtn.addEventListener('click', () => {
+          if (confirm(`${player.name} wirklich aus der Lobby entfernen?`)) {
+            kickPlayer(uid);
+          }
+        });
+        li.appendChild(kickBtn);
       }
 
       list.appendChild(li);
@@ -312,39 +545,29 @@ function renderPlayerList() {
 
 // Start-Button freischalten ab 3 Spielern
 function updateStartButton() {
-  const count   = Object.keys(State.players).length;
-  const btn     = document.getElementById('btn-start');
-  const hint    = document.getElementById('host-hint');
+  const count = Object.keys(State.players).length;
+  const btn   = document.getElementById('btn-start');
+  const hint  = document.getElementById('host-hint');
+  if (!btn) return;
 
-  if (count >= 3) {
-    btn.disabled = false;
-    hint.textContent = `${count} Spieler bereit – Spiel kann gestartet werden!`;
-    log('Start-Button freigeschalten:', count, 'Spieler');
-  } else {
-    btn.disabled = true;
-    hint.textContent = `Mindestens 3 Spieler werden benötigt (aktuell: ${count}).`;
-  }
+  btn.disabled = count < 3;
+  hint.textContent = count >= 3
+    ? `${count} Spieler bereit – los geht's!`
+    : `Mindestens 3 Spieler benötigt (aktuell: ${count}).`;
 }
 
 // ══════════════════════════════════════════════════════════════
-//  SPIEL STARTEN (nur Host)
+//  SPIEL STARTEN
 // ══════════════════════════════════════════════════════════════
 
 async function startGame() {
-  log('Spiel wird gestartet – wähle zufälligen Rater und Wort');
-
-  const playerUIDs = Object.keys(State.players);
-
-  // Zufälligen Rater wählen
-  const guesserIndex = Math.floor(Math.random() * playerUIDs.length);
-  const guesserUID   = playerUIDs[guesserIndex];
-
-  // Zufälliges Wort wählen
-  const word = WORD_LIST[Math.floor(Math.random() * WORD_LIST.length)];
+  log('Spiel starten');
+  const playerUIDs   = Object.keys(State.players);
+  const guesserUID   = playerUIDs[Math.floor(Math.random() * playerUIDs.length)];
+  const word         = WORD_LIST[Math.floor(Math.random() * WORD_LIST.length)];
 
   log('Rater:', State.players[guesserUID]?.name, '| Wort:', word);
 
-  // Datenbank aktualisieren – alle Clients erhalten die Phase automatisch
   await State.db.ref(`lobbies/${State.lobbyCode}`).update({
     phase:      'clue',
     secretWord: word,
@@ -352,18 +575,15 @@ async function startGame() {
     clues:      {},
     guess:      null,
   });
-
-  log('Spielstart in Datenbank geschrieben');
 }
 
 // ══════════════════════════════════════════════════════════════
-//  PHASENWECHSEL HANDLER
+//  PHASENWECHSEL
 // ══════════════════════════════════════════════════════════════
 
 async function handlePhaseChange(phase) {
-  log('Phasenwechsel wird verarbeitet:', phase);
+  log('Phasenwechsel:', phase);
 
-  // Aktuelle Spieldaten laden
   const snap = await State.db.ref(`lobbies/${State.lobbyCode}`).once('value');
   const data  = snap.val();
 
@@ -373,312 +593,204 @@ async function handlePhaseChange(phase) {
   State.isGuesser  = (State.uid === State.guesserUID);
   State.clues      = data.clues || {};
 
-  log('Aktualisierte Zustandsdaten:', {
-    phase,
-    secretWord: State.secretWord,
-    isGuesser:  State.isGuesser,
-    clueCount:  Object.keys(State.clues).length,
-  });
-
   switch (phase) {
-
-    case 'clue':
-      enterCluePhase();
-      break;
-
-    case 'reveal':
-      enterRevealPhase();
-      break;
-
-    case 'guess':
-      enterGuessPhase();
-      break;
-
-    case 'result':
-      enterResultPhase(data.guess);
-      break;
+    case 'clue':   enterCluePhase();         break;
+    case 'reveal': enterRevealPhase();        break;
+    case 'guess':  enterGuessPhase();         break;
+    case 'result': enterResultPhase(data.guess); break;
   }
 }
 
 // ══════════════════════════════════════════════════════════════
-//  PHASE: HINWEIS GEBEN
+//  PHASE: CLUE
 // ══════════════════════════════════════════════════════════════
 
 function enterCluePhase() {
-  log('Hinweis-Phase startet – isGuesser:', State.isGuesser);
-
+  log('Clue-Phase – isGuesser:', State.isGuesser);
   if (State.isGuesser) {
-    // Rater wartet
     showScreen('guesserWait');
-    watchForReveal();
   } else {
-    // Wortgeber: Geheimwort anzeigen + Hinweis eingeben
     document.getElementById('secret-word-display').textContent = State.secretWord;
-    document.getElementById('input-clue').value = '';
+    document.getElementById('input-clue').value    = '';
     document.getElementById('input-clue').disabled = false;
     document.getElementById('btn-submit-clue').disabled = false;
     document.getElementById('clue-submitted-msg').classList.add('hidden');
-
     showScreen('clue');
     watchForAllCluesSubmitted();
   }
 }
 
-// Hinweis abschicken
 async function submitClue() {
   const clueText = document.getElementById('input-clue').value.trim();
+  if (!clueText) return;
 
-  if (!clueText) {
-    log('Leerer Hinweis – wird ignoriert');
-    return;
-  }
-
-  log('Hinweis wird abgeschickt:', clueText);
-
-  // Eingabe deaktivieren
-  document.getElementById('input-clue').disabled = true;
+  log('Hinweis:', clueText);
+  document.getElementById('input-clue').disabled      = true;
   document.getElementById('btn-submit-clue').disabled = true;
   document.getElementById('clue-submitted-msg').classList.remove('hidden');
 
-  // In Datenbank schreiben
   await State.db.ref(`lobbies/${State.lobbyCode}/clues/${State.uid}`).set(clueText);
-  log('Hinweis gespeichert');
 }
 
-// Warten bis alle Wortgeber ihren Hinweis eingegeben haben
 function watchForAllCluesSubmitted() {
-  const cluesRef = State.db.ref(`lobbies/${State.lobbyCode}/clues`);
-  addListener(cluesRef, 'value', async (snap) => {
-    const clues      = snap.val() || {};
-    const clueCount  = Object.keys(clues).length;
-    const giversCount = Object.keys(State.players).length - 1; // Rater zählt nicht
+  addListener(
+    State.db.ref(`lobbies/${State.lobbyCode}/clues`),
+    'value',
+    async (snap) => {
+      const clues       = snap.val() || {};
+      const clueCount   = Object.keys(clues).length;
+      const giversCount = Object.keys(State.players).length - 1;
 
-    log(`Hinweise eingegangen: ${clueCount} / ${giversCount}`);
+      log(`Clues: ${clueCount}/${giversCount}`);
 
-    // Wenn alle Hinweise da sind und dieser Spieler Host ist → Phase wechseln
-    if (clueCount >= giversCount && State.isHost) {
-      log('Alle Hinweise vorhanden – wechsle zu Reveal-Phase');
-      await State.db.ref(`lobbies/${State.lobbyCode}`).update({
-        phase: 'reveal',
-        clues: clues,
-      });
+      if (clueCount >= giversCount && State.isHost) {
+        await State.db.ref(`lobbies/${State.lobbyCode}`).update({
+          phase: 'reveal',
+          clues: clues,
+        });
+      }
     }
-  });
-}
-
-// Rater: Warten auf Phase 'reveal'
-function watchForReveal() {
-  const phaseRef = State.db.ref(`lobbies/${State.lobbyCode}/phase`);
-  addListener(phaseRef, 'value', (snap) => {
-    const phase = snap.val();
-    log('Rater wartet – Phase jetzt:', phase);
-    if (phase === 'guess') {
-      // Wird durch handlePhaseChange behandelt
-    }
-  });
+  );
 }
 
 // ══════════════════════════════════════════════════════════════
-//  PHASE: REVEAL – Doppelte Wörter animiert streichen
+//  PHASE: REVEAL
 // ══════════════════════════════════════════════════════════════
 
 async function enterRevealPhase() {
-  log('Reveal-Phase startet – verarbeite Hinweise');
+  log('Reveal-Phase');
 
-  // Aktuelle Clues aus Datenbank laden
   const snap  = await State.db.ref(`lobbies/${State.lobbyCode}/clues`).once('value');
   State.clues = snap.val() || {};
 
-  const allClues = Object.entries(State.clues); // [[uid, text], ...]
-
-  log('Alle Hinweise:', allClues.map(([, t]) => t));
-
-  // Doppelte Wörter finden (case-insensitive)
+  const allClues   = Object.entries(State.clues);
   const duplicates = findDuplicates(allClues.map(([, t]) => t));
-  log('Doppelte Hinweise:', [...duplicates]);
+  log('Duplikate:', [...duplicates]);
 
-  // Hinweisliste rendern
   const list = document.getElementById('clue-list');
   list.innerHTML = '';
-
-  allClues.forEach(([uid, text], index) => {
-    const li = document.createElement('li');
-
+  allClues.forEach(([uid, text], i) => {
+    const li     = document.createElement('li');
     const bullet = document.createElement('div');
-    bullet.className = 'clue-bullet';
-    bullet.textContent = index + 1;
-
-    const textNode = document.createTextNode(text);
-
+    bullet.className   = 'clue-bullet';
+    bullet.textContent = i + 1;
     li.appendChild(bullet);
-    li.appendChild(textNode);
-    li.dataset.text = text.toLowerCase();
-
+    li.appendChild(document.createTextNode(text));
+    li.dataset.text = text.toLowerCase().trim();
     list.appendChild(li);
   });
 
   showScreen('reveal');
-
-  // Streichanimation nach kurzer Verzögerung starten
   setTimeout(() => animateStrikethrough(duplicates), 800);
 
-  // Nach Animation: Weiter-Button anzeigen (nur Host)
-  const animDuration = 600 + duplicates.size * 500 + 1200;
+  const animMs = 800 + duplicates.size * 500 + 1200;
   setTimeout(() => {
-    log('Streichanimation abgeschlossen');
     if (State.isHost) {
       document.getElementById('btn-to-guess').classList.remove('hidden');
     }
-  }, animDuration);
+  }, animMs);
 }
 
-// Doppelte Wörter als Set zurückgeben (case-insensitive)
 function findDuplicates(texts) {
-  const normalized = texts.map(t => t.toLowerCase().trim());
-  const seen    = new Set();
-  const dupes   = new Set();
-
-  normalized.forEach(t => {
-    if (seen.has(t)) dupes.add(t);
-    else seen.add(t);
+  const seen  = new Set();
+  const dupes = new Set();
+  texts.forEach(t => {
+    const n = t.toLowerCase().trim();
+    if (seen.has(n)) dupes.add(n);
+    else seen.add(n);
   });
-
-  log('findDuplicates – gefundene Duplikate:', [...dupes]);
   return dupes;
 }
 
-// Streichanimation: Duplikate nacheinander durchstreichen
 function animateStrikethrough(duplicates) {
-  if (duplicates.size === 0) {
-    log('Keine Duplikate – überspringe Streichanimation');
-    return;
-  }
-
-  const items = document.querySelectorAll('#clue-list li');
+  if (!duplicates.size) return;
   let delay = 0;
-
-  items.forEach(li => {
-    const text = li.dataset.text;
-    if (duplicates.has(text)) {
-      setTimeout(() => {
-        log('Streiche Hinweis:', li.textContent.trim());
-        li.classList.add('strike');
-      }, delay);
+  document.querySelectorAll('#clue-list li').forEach(li => {
+    if (duplicates.has(li.dataset.text)) {
+      setTimeout(() => li.classList.add('strike'), delay);
       delay += 500;
     }
   });
 }
 
-// Host: Zur Ratephase wechseln
 async function proceedToGuess() {
-  log('Host: Wechsle zur Guess-Phase');
-
-  // Valide (nicht gestrichene) Hinweise ermitteln
+  log('Zu Guess-Phase');
   const snap  = await State.db.ref(`lobbies/${State.lobbyCode}/clues`).once('value');
   const clues = snap.val() || {};
+  const dupes = findDuplicates(Object.values(clues));
 
-  const allTexts = Object.values(clues);
-  const duplicates = findDuplicates(allTexts);
-
-  // Nur nicht-doppelte Hinweise weitergeben
   const validClues = {};
   Object.entries(clues).forEach(([uid, text]) => {
-    if (!duplicates.has(text.toLowerCase().trim())) {
-      validClues[uid] = text;
-    }
+    if (!dupes.has(text.toLowerCase().trim())) validClues[uid] = text;
   });
 
-  log('Valide Hinweise für Rater:', validClues);
-
   await State.db.ref(`lobbies/${State.lobbyCode}`).update({
-    phase:  'guess',
-    clues:  validClues,
+    phase: 'guess',
+    clues: validClues,
   });
 }
 
 // ══════════════════════════════════════════════════════════════
-//  PHASE: RATEN
+//  PHASE: GUESS
 // ══════════════════════════════════════════════════════════════
 
 async function enterGuessPhase() {
-  log('Guess-Phase startet – isGuesser:', State.isGuesser);
+  log('Guess-Phase – isGuesser:', State.isGuesser);
 
-  // Aktuelle valide Hinweise laden
   const snap  = await State.db.ref(`lobbies/${State.lobbyCode}/clues`).once('value');
   State.clues = snap.val() || {};
 
-  const validClues = Object.values(State.clues);
-  log('Hinweise für Rater:', validClues);
-
   if (State.isGuesser) {
-    // Hinweise anzeigen
     const list = document.getElementById('guesser-clue-list');
     list.innerHTML = '';
-    validClues.forEach(text => {
+    Object.values(State.clues).forEach(text => {
       const li = document.createElement('li');
       li.textContent = text;
       list.appendChild(li);
     });
-
     document.getElementById('input-guess').value = '';
     showScreen('guess');
   } else {
-    // Wortgeber warten auf Ergebnis
-    showScreen('guesserWait');
     document.querySelector('#screen-guesser-wait .wait-title').textContent = 'Der Rater denkt nach…';
-
-    // Auf Result-Phase warten
-    watchForResult();
+    showScreen('guesserWait');
+    addListener(
+      State.db.ref(`lobbies/${State.lobbyCode}/phase`),
+      'value',
+      (snap) => {
+        if (snap.val() === 'result') {
+          State.db.ref(`lobbies/${State.lobbyCode}`).once('value').then(s => {
+            enterResultPhase(s.val().guess);
+          });
+        }
+      }
+    );
   }
 }
 
-// Wortgeber: Warten bis Ergebnis da ist
-function watchForResult() {
-  const phaseRef = State.db.ref(`lobbies/${State.lobbyCode}/phase`);
-  addListener(phaseRef, 'value', (snap) => {
-    const phase = snap.val();
-    if (phase === 'result') {
-      log('Ergebnis-Phase erkannt – lade Daten');
-      State.db.ref(`lobbies/${State.lobbyCode}`).once('value').then(s => {
-        const data = s.val();
-        enterResultPhase(data.guess);
-      });
-    }
-  });
-}
-
-// Raten abschicken
 async function submitGuess() {
   const guessText = document.getElementById('input-guess').value.trim();
+  if (!guessText) return;
 
-  if (!guessText) {
-    log('Leere Antwort – wird ignoriert');
-    return;
-  }
-
-  log('Antwort wird abgeschickt:', guessText);
-
+  log('Antwort:', guessText);
   await State.db.ref(`lobbies/${State.lobbyCode}`).update({
     phase: 'result',
     guess: guessText,
   });
-
-  log('Antwort gespeichert – wechsle zu Ergebnis');
 }
 
 // ══════════════════════════════════════════════════════════════
-//  PHASE: ERGEBNIS
+//  PHASE: RESULT
 // ══════════════════════════════════════════════════════════════
 
 async function enterResultPhase(guess) {
-  log('Ergebnis-Phase startet – Antwort:', guess, '| Wort:', State.secretWord);
+  log('Result-Phase – Antwort:', guess, '| Wort:', State.secretWord);
 
   const correct = guess?.toLowerCase().trim() === State.secretWord?.toLowerCase().trim();
-  log('Ergebnis:', correct ? '✓ RICHTIG' : '✗ FALSCH');
+  log(correct ? '✓ RICHTIG' : '✗ FALSCH');
 
   document.getElementById('result-icon').textContent  = correct ? '🎉' : '😬';
-  document.getElementById('result-title').textContent  = correct ? 'Richtig!' : 'Leider falsch…';
-  document.getElementById('result-title').className    = 'result-title ' + (correct ? 'correct' : 'wrong');
+  document.getElementById('result-title').textContent = correct ? 'Richtig!' : 'Leider falsch…';
+  document.getElementById('result-title').className   = 'result-title ' + (correct ? 'correct' : 'wrong');
 
   const guesserName = State.players[State.guesserUID]?.name || 'Der Rater';
   document.getElementById('result-guess').innerHTML =
@@ -686,29 +798,24 @@ async function enterResultPhase(guess) {
   document.getElementById('result-word').innerHTML =
     `Das gesuchte Wort war: <strong>${State.secretWord}</strong>`;
 
-  // Host: Nächste Runde / Beenden Buttons
-  const hostNext    = document.getElementById('host-next-controls');
-  const waitingNext = document.getElementById('waiting-next-msg');
   if (State.isHost) {
-    hostNext.classList.remove('hidden');
-    waitingNext.classList.add('hidden');
+    document.getElementById('host-next-controls').classList.remove('hidden');
+    document.getElementById('waiting-next-msg').classList.add('hidden');
   } else {
-    hostNext.classList.add('hidden');
-    waitingNext.classList.remove('hidden');
+    document.getElementById('host-next-controls').classList.add('hidden');
+    document.getElementById('waiting-next-msg').classList.remove('hidden');
   }
 
   showScreen('result');
 }
 
 // ══════════════════════════════════════════════════════════════
-//  NÄCHSTE RUNDE / SPIEL BEENDEN
+//  NÄCHSTE RUNDE / BEENDEN
 // ══════════════════════════════════════════════════════════════
 
 async function nextRound() {
-  log('Nächste Runde wird gestartet');
+  log('Nächste Runde');
   removeAllListeners();
-
-  // Nur Host setzt neue Phase – Lobby-Screen neu aufsetzen ohne Listener zu duplizieren
   await State.db.ref(`lobbies/${State.lobbyCode}`).update({
     phase:      'lobby',
     secretWord: null,
@@ -716,32 +823,21 @@ async function nextRound() {
     clues:      {},
     guess:      null,
   });
-
-  // Kurz warten, dann Lobby-Screen neu aufrufen
-  setTimeout(() => {
-    enterLobbyScreen();
-  }, 300);
+  setTimeout(() => enterLobbyScreen(), 300);
 }
 
 async function endGame() {
-  log('Spiel wird beendet – Lobby wird gelöscht');
+  log('Spiel beenden');
   removeAllListeners();
-
   await State.db.ref(`lobbies/${State.lobbyCode}`).remove();
-
-  // Zurück zum Start-Screen
+  localStorage.removeItem('onechance_lobby');
   State.lobbyCode = null;
   State.isHost    = false;
   showScreen('start');
 }
 
 // ══════════════════════════════════════════════════════════════
-//  FIREBASE CONFIG MODAL – entfernt (Config ist fest eingebaut)
-// ══════════════════════════════════════════════════════════════
-// Firebase wird direkt über FIREBASE_CONFIG in initFirebase() gestartet.
-
-// ══════════════════════════════════════════════════════════════
-//  EVENT LISTENER – START-SCREEN
+//  EVENT LISTENER
 // ══════════════════════════════════════════════════════════════
 
 document.getElementById('btn-join').addEventListener('click', async () => {
@@ -750,31 +846,27 @@ document.getElementById('btn-join').addEventListener('click', async () => {
   const errEl = document.getElementById('start-error');
   errEl.textContent = '';
 
-  if (!name) {
-    errEl.textContent = 'Bitte gib deinen Namen ein.';
-    return;
-  }
+  if (!name)     { errEl.textContent = 'Bitte gib deinen Namen ein.'; return; }
+  if (!State.db) { errEl.textContent = 'Firebase nicht verbunden.';   return; }
 
-  if (!State.db) {
-    errEl.textContent = 'Firebase nicht verbunden. Bitte Seite neu laden.';
-    return;
-  }
+  // Spieler-Limit aus Start-Dropdown (nur wenn neue Lobby)
+  const limitSel = document.getElementById('select-max-players-start');
+  if (limitSel && !code) State.maxPlayers = parseInt(limitSel.value, 10);
 
-  log('Join-Button geklickt – Name:', name, '| Code:', code || '(neu)');
+  log('Join-Klick – Name:', name, '| Code:', code || '(neu)');
 
   try {
     State.uid  = getOrCreateUID();
     State.name = name;
-
     await joinOrCreateLobby(name, code);
     enterLobbyScreen();
   } catch (e) {
-    log('Fehler beim Beitreten:', e.message);
+    log('Fehler:', e.message);
     errEl.textContent = e.message;
   }
 });
 
-// Enter-Taste in Inputs
+// Enter-Taste
 document.getElementById('input-name').addEventListener('keydown', e => {
   if (e.key === 'Enter') document.getElementById('btn-join').click();
 });
@@ -782,60 +874,86 @@ document.getElementById('input-lobby').addEventListener('keydown', e => {
   if (e.key === 'Enter') document.getElementById('btn-join').click();
 });
 
-// ── Lobby-Code kopieren ──
+// Code kopieren
 document.getElementById('btn-copy-code').addEventListener('click', () => {
   const code = document.getElementById('lobby-code-display').textContent;
   navigator.clipboard.writeText(code).then(() => {
-    log('Lobby-Code in Zwischenablage kopiert:', code);
+    showToast('📋 Code kopiert!');
     document.getElementById('btn-copy-code').textContent = '✓';
-    setTimeout(() => {
-      document.getElementById('btn-copy-code').textContent = '⧉';
-    }, 1500);
+    setTimeout(() => document.getElementById('btn-copy-code').textContent = '⧉', 1500);
   });
 });
 
-// ── Spiel starten (Host) ──
-document.getElementById('btn-start').addEventListener('click', () => {
-  log('Start-Button geklickt');
-  startGame();
+// Einlade-Buttons
+document.getElementById('btn-invite-link').addEventListener('click', copyInviteLink);
+document.getElementById('btn-invite-wa').addEventListener('click', shareWhatsApp);
+
+// Spieler-Limit Dropdown (in Lobby)
+document.getElementById('select-max-players').addEventListener('change', e => {
+  updateMaxPlayers(e.target.value);
 });
 
-// ── Hinweis abschicken ──
+// Start
+document.getElementById('btn-start').addEventListener('click', startGame);
+
+// Hinweis
 document.getElementById('btn-submit-clue').addEventListener('click', submitClue);
 document.getElementById('input-clue').addEventListener('keydown', e => {
   if (e.key === 'Enter') submitClue();
 });
 
-// ── Zur Ratephase (Host nach Reveal) ──
+// Reveal → Guess
 document.getElementById('btn-to-guess').addEventListener('click', proceedToGuess);
 
-// ── Antwort abschicken ──
+// Raten
 document.getElementById('btn-submit-guess').addEventListener('click', submitGuess);
 document.getElementById('input-guess').addEventListener('keydown', e => {
   if (e.key === 'Enter') submitGuess();
 });
 
-// ── Nächste Runde / Beenden (Host) ──
+// Ergebnis
 document.getElementById('btn-next-round').addEventListener('click', nextRound);
 document.getElementById('btn-end-game').addEventListener('click', endGame);
 
 // ══════════════════════════════════════════════════════════════
-//  INITIALISIERUNG BEIM SEITENAUFRUF
+//  INITIALISIERUNG
 // ══════════════════════════════════════════════════════════════
 
-(function init() {
-  log('Anwendung wird initialisiert');
+(async function init() {
+  log('Init');
 
-  // Firebase direkt mit fest eingebauter Config starten – kein Modal nötig
   const ok = initFirebase();
-  if (ok) {
-    log('Firebase bereit – zeige Start-Screen');
-    showScreen('start');
-  } else {
-    // Fallback: Fehlermeldung im Start-Screen anzeigen
-    log('FEHLER: Firebase konnte nicht initialisiert werden');
+  if (!ok) {
     showScreen('start');
     document.getElementById('start-error').textContent =
       'Firebase-Verbindung fehlgeschlagen. Bitte Seite neu laden.';
+    return;
   }
+
+  // UID laden
+  State.uid = getOrCreateUID();
+
+  // Letzten Namen vorausfüllen
+  const savedName = loadSavedName();
+  if (savedName) {
+    document.getElementById('input-name').value = savedName;
+    log('Letzter Name:', savedName);
+  }
+
+  // URL-Parameter: ?lobby=CODE → Einlade-Link
+  const urlParams  = new URLSearchParams(window.location.search);
+  const lobbyParam = urlParams.get('lobby');
+  if (lobbyParam) {
+    document.getElementById('input-lobby').value = lobbyParam.toUpperCase();
+    log('Lobby aus URL:', lobbyParam);
+    showToast(`🎮 Lobby ${lobbyParam} – Namen eingeben und beitreten!`);
+  }
+
+  // Host-Reconnect prüfen (nur wenn kein URL-Parameter)
+  if (!lobbyParam) {
+    const reconnected = await checkHostReconnect(State.uid);
+    if (reconnected) return;
+  }
+
+  showScreen('start');
 })();
