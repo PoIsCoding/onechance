@@ -1,0 +1,444 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>One Chance – Das Ratespiel</title>
+    <meta
+      name="description"
+      content="One Chance – Das kooperative Multiplayer-Wort-Ratespiel"
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Syne:wght@400;700;800&family=DM+Sans:wght@300;400;500&display=swap"
+      rel="stylesheet"
+    />
+
+    <!-- Firebase -->
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
+
+    <!-- QR-Code Bibliothek (CDN, keine npm nötig) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+
+    <!-- Wortlisten (eigene Dateien, leicht erweiterbar) -->
+    <script src="assets/words/words-leicht.js"></script>
+    <script src="assets/words/words-mittel.js"></script>
+    <script src="assets/words/words-schwer.js"></script>
+    <script src="assets/words/words-fsk18.js"></script>
+
+    <link rel="stylesheet" href="assets/css/style.css" />
+  </head>
+  <body>
+    <!-- ════════════════════════════════════════════════════════════
+     SCREEN 1 – START / JOIN
+════════════════════════════════════════════════════════════ -->
+    <div id="screen-start" class="screen active">
+      <div class="bg-orbs">
+        <span class="orb orb1"></span><span class="orb orb2"></span
+        ><span class="orb orb3"></span>
+      </div>
+      <div class="card center-card">
+        <h1 class="logo">One<br /><em>Chance</em></h1>
+        <p class="tagline">Das kooperative Wort-Ratespiel</p>
+
+        <div class="field-group">
+          <input
+            id="input-name"
+            type="text"
+            placeholder="Dein Name"
+            maxlength="16"
+            autocomplete="off"
+          />
+        </div>
+
+        <!-- Rollen-Auswahl -->
+        <div class="role-select-group">
+          <button
+            class="role-btn active-spieler"
+            data-role="spieler"
+            id="role-btn-spieler"
+          >
+            🎮 Spieler
+          </button>
+          <button
+            class="role-btn"
+            data-role="zuschauer"
+            id="role-btn-zuschauer"
+          >
+            👁 Zuschauer
+          </button>
+        </div>
+
+        <div class="divider"><span>Lobby</span></div>
+
+        <div class="field-group">
+          <input
+            id="input-lobby"
+            type="text"
+            placeholder="Lobby-Code (leer = neu erstellen)"
+            maxlength="6"
+            autocomplete="off"
+            style="text-transform: uppercase"
+          />
+        </div>
+
+        <!-- Optionen für neue Lobby (nur wenn kein Code eingegeben) -->
+        <div id="new-lobby-options">
+          <!-- Spieler-Limit Slider -->
+          <div class="slider-group">
+            <div class="slider-label">
+              <span>Max. Spieler</span>
+              <strong id="slider-val-display">8</strong>
+            </div>
+            <input
+              type="range"
+              id="slider-max-players"
+              min="3"
+              max="12"
+              value="8"
+            />
+          </div>
+
+          <!-- Kategorie-Auswahl -->
+          <div class="category-group">
+            <span class="category-label">Kategorie</span>
+            <div class="category-chips">
+              <button class="chip active" data-cat="leicht">😊 Leicht</button>
+              <button class="chip" data-cat="mittel">🤔 Mittel</button>
+              <button class="chip" data-cat="schwer">🧠 Schwer</button>
+              <button class="chip fsk" data-cat="fsk18">🔞 FSK18</button>
+            </div>
+          </div>
+        </div>
+
+        <button id="btn-join" class="btn-primary">Beitreten / Erstellen</button>
+        <p id="start-error" class="error-msg"></p>
+      </div>
+    </div>
+
+    <!-- ════════════════════════════════════════════════════════════
+     SCREEN 2 – LOBBY
+════════════════════════════════════════════════════════════ -->
+    <div id="screen-lobby" class="screen">
+      <div class="bg-orbs">
+        <span class="orb orb1"></span><span class="orb orb2"></span>
+      </div>
+      <div class="card lobby-card">
+        <div class="lobby-header">
+          <h2>Lobby</h2>
+          <div class="lobby-code-box">
+            <span id="lobby-code-display">----</span>
+            <button id="btn-copy-code" class="btn-copy" title="Code kopieren">
+              ⧉
+            </button>
+          </div>
+        </div>
+        <p class="lobby-subtitle">
+          Spieler: <strong id="player-count">0 / 8</strong> &nbsp;·&nbsp;
+          Kategorie: <strong id="category-display">Leicht</strong>
+        </p>
+
+        <div class="lobby-inner">
+          <!-- Linke Spalte: Spielerliste + QR -->
+          <div class="lobby-left">
+            <!-- QR-Code (nur wenn TV-Spieler vorhanden) -->
+            <div id="qr-area" class="qr-area hidden">
+              <div id="qrcode"></div>
+              <p class="qr-label">QR-Code scannen zum Beitreten</p>
+            </div>
+
+            <ul id="player-list" class="player-list"></ul>
+
+            <!-- Einlade-Bereich -->
+            <div id="invite-area" class="invite-area hidden">
+              <p class="invite-label">Einladen</p>
+              <div class="invite-buttons">
+                <button id="btn-invite-link" class="btn-invite">
+                  🔗 Link kopieren
+                </button>
+                <button id="btn-invite-wa" class="btn-invite btn-wa">
+                  WhatsApp
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Rechte Spalte: Controls -->
+          <div class="lobby-right">
+            <!-- Host-Controls -->
+            <div id="host-controls" class="host-controls hidden">
+              <!-- Spieler-Limit Slider -->
+              <div class="slider-group">
+                <div class="slider-label">
+                  <span>Spieler-Limit</span>
+                  <strong id="lobby-slider-val">8</strong>
+                </div>
+                <input
+                  type="range"
+                  id="lobby-slider-max"
+                  min="3"
+                  max="12"
+                  value="8"
+                />
+              </div>
+
+              <!-- Kategorie in Lobby ändern -->
+              <div class="category-group">
+                <span class="category-label">Kategorie</span>
+                <div class="category-chips" id="lobby-category-chips">
+                  <button class="chip active" data-cat="leicht">
+                    😊 Leicht
+                  </button>
+                  <button class="chip" data-cat="mittel">🤔 Mittel</button>
+                  <button class="chip" data-cat="schwer">🧠 Schwer</button>
+                  <button class="chip fsk" data-cat="fsk18">🔞 FSK18</button>
+                </div>
+              </div>
+
+              <p id="host-hint" class="host-hint">
+                Mindestens 3 Spieler werden benötigt.
+              </p>
+              <button id="btn-start" class="btn-primary" disabled>
+                Spiel starten
+              </button>
+              <button
+                id="btn-close-lobby"
+                class="btn-secondary"
+                style="
+                  margin-top: 8px;
+                  border-color: rgba(255, 107, 107, 0.3);
+                  color: var(--accent2);
+                "
+              >
+                ✕ Lobby schließen
+              </button>
+            </div>
+
+            <p id="waiting-msg" class="waiting-msg">Warte auf den Host…</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ════════════════════════════════════════════════════════════
+     SCREEN 3 – HINWEIS GEBEN (Wortgeber / Spieler)
+════════════════════════════════════════════════════════════ -->
+    <div id="screen-clue" class="screen">
+      <div class="bg-orbs">
+        <span class="orb orb1"></span><span class="orb orb2"></span>
+      </div>
+      <div class="card clue-card">
+        <p class="role-badge">Wortgeber</p>
+        <p class="round-label">Das gesuchte Wort ist:</p>
+        <div class="secret-word-box">
+          <span id="secret-word-display">—</span>
+        </div>
+        <p class="clue-instruction">Gib einen einzigen Hinweis-Begriff ein:</p>
+        <div class="field-group">
+          <input
+            id="input-clue"
+            type="text"
+            placeholder="Dein Hinweis…"
+            maxlength="30"
+            autocomplete="off"
+          />
+        </div>
+        <button id="btn-submit-clue" class="btn-primary">Bestätigen</button>
+        <p id="clue-submitted-msg" class="success-msg hidden">
+          ✓ Hinweis abgeschickt! Warte auf die anderen…
+        </p>
+      </div>
+    </div>
+
+    <!-- ════════════════════════════════════════════════════════════
+     SCREEN 4 – WARTEN (Rater / TV-Spieler)
+════════════════════════════════════════════════════════════ -->
+    <div id="screen-guesser-wait" class="screen">
+      <div class="bg-orbs"><span class="orb orb1"></span></div>
+      <div class="card center-card" style="text-align: center">
+        <p class="role-badge rater">Rater</p>
+        <h2 class="wait-title">Die anderen denken nach…</h2>
+        <div class="spinner"></div>
+        <p class="wait-sub">Du bekommst gleich deine Hinweise!</p>
+      </div>
+    </div>
+
+    <!-- ════════════════════════════════════════════════════════════
+     SCREEN 5 – MODERATOR-PRÜFUNG (nach Clue-Phase)
+     Moderator kann Hinweise manuell streichen
+════════════════════════════════════════════════════════════ -->
+    <div id="screen-mod-review" class="screen">
+      <div class="bg-orbs">
+        <span class="orb orb1"></span><span class="orb orb2"></span>
+      </div>
+      <div class="card reveal-card">
+        <p class="role-badge mod">Moderator</p>
+        <p class="round-label">Hinweise prüfen</p>
+        <p class="reveal-sub">
+          Streiche ungültige Hinweise manuell. Dann bestätigen.
+        </p>
+        <ul id="mod-clue-list" class="clue-list"></ul>
+        <button id="btn-mod-confirm" class="btn-primary">
+          ✓ Prüfung abgeschlossen
+        </button>
+      </div>
+    </div>
+
+    <!-- ════════════════════════════════════════════════════════════
+     SCREEN 6 – REVEAL (animiertes Durchstreichen)
+     Nur für Wortgeber & Host sichtbar – NICHT für Rater
+════════════════════════════════════════════════════════════ -->
+    <div id="screen-reveal" class="screen">
+      <div class="bg-orbs">
+        <span class="orb orb1"></span><span class="orb orb2"></span>
+      </div>
+      <div class="card reveal-card">
+        <p class="round-label">Hinweise für den Rater</p>
+        <p class="reveal-sub">Doppelte Begriffe werden gestrichen…</p>
+        <ul id="clue-list" class="clue-list"></ul>
+        <!-- Countdown-Ring statt Bestätigungs-Button -->
+        <div id="reveal-countdown" class="countdown-ring hidden">
+          <svg width="80" height="80" viewBox="0 0 80 80">
+            <circle cx="40" cy="40" r="36" />
+            <circle
+              cx="40"
+              cy="40"
+              r="36"
+              class="progress"
+              id="countdown-circle"
+            />
+          </svg>
+          <div class="countdown-num" id="countdown-num">5</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ════════════════════════════════════════════════════════════
+     SCREEN 7 – RATEN (Rater / TV-Spieler nach Animation)
+════════════════════════════════════════════════════════════ -->
+    <div id="screen-guess" class="screen">
+      <div class="bg-orbs">
+        <span class="orb orb1"></span><span class="orb orb2"></span>
+      </div>
+      <div class="card clue-card">
+        <p class="role-badge rater">Rater</p>
+        <p class="round-label">Deine Hinweise:</p>
+        <ul id="guesser-clue-list" class="clue-list-inline"></ul>
+        <p class="clue-instruction">Was ist das gesuchte Wort?</p>
+        <div class="field-group">
+          <input
+            id="input-guess"
+            type="text"
+            placeholder="Deine Antwort…"
+            maxlength="30"
+            autocomplete="off"
+          />
+        </div>
+        <button id="btn-submit-guess" class="btn-primary">
+          Antwort abgeben
+        </button>
+      </div>
+    </div>
+
+    <!-- ════════════════════════════════════════════════════════════
+     SCREEN 8 – TV-SPIELER WARTE-SCREEN (sieht nichts bis Reveal)
+════════════════════════════════════════════════════════════ -->
+    <div id="screen-tv-wait" class="screen">
+      <div class="bg-orbs"><span class="orb orb1"></span></div>
+      <div class="card center-card" style="text-align: center">
+        <p
+          class="role-badge rater"
+          style="
+            background: rgba(229, 62, 62, 0.12);
+            color: #e53e3e;
+            border-color: rgba(229, 62, 62, 0.28);
+          "
+        >
+          📺 TV-Spieler
+        </p>
+        <h2 class="wait-title">Kein Spicken!</h2>
+        <div class="spinner" style="border-top-color: #e53e3e"></div>
+        <p class="wait-sub">
+          Bitte mit dem Rücken zum Bildschirm sitzen.<br />Die Hinweise werden
+          gleich angezeigt.
+        </p>
+      </div>
+    </div>
+
+    <!-- ════════════════════════════════════════════════════════════
+     SCREEN 9 – ZUSCHAUER / MODERATOR BEOBACHTEN
+     Sehen Wort + alle Eingaben in Echtzeit
+════════════════════════════════════════════════════════════ -->
+    <div id="screen-observer" class="screen">
+      <div class="bg-orbs">
+        <span class="orb orb1"></span><span class="orb orb2"></span>
+      </div>
+      <div class="card observer-card">
+        <p id="observer-role-badge" class="role-badge viewer">Zuschauer</p>
+
+        <!-- Geheimwort (immer sichtbar) -->
+        <div class="observer-secret">
+          <span class="label">Geheimwort:</span>
+          <span class="word" id="observer-secret-word">—</span>
+        </div>
+
+        <!-- Eingaben der Spieler live -->
+        <p class="observer-clues-label">Eingaben der Spieler:</p>
+        <ul id="observer-clue-list" class="clue-list"></ul>
+
+        <!-- Rater-Antwort (sobald vorhanden) -->
+        <div id="observer-guess-area" class="hidden">
+          <p class="observer-clues-label">Antwort des Raters:</p>
+          <div
+            class="observer-secret"
+            style="border-color: rgba(255, 107, 107, 0.3)"
+          >
+            <span class="label">Geraten:</span>
+            <span
+              class="word"
+              id="observer-guess-word"
+              style="color: var(--accent2)"
+              >—</span
+            >
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ════════════════════════════════════════════════════════════
+     SCREEN 10 – ERGEBNIS
+════════════════════════════════════════════════════════════ -->
+    <div id="screen-result" class="screen">
+      <div class="bg-orbs">
+        <span class="orb orb1"></span><span class="orb orb2"></span
+        ><span class="orb orb3"></span>
+      </div>
+      <div class="card result-card">
+        <div id="result-icon" class="result-icon">🎉</div>
+        <h2 id="result-title" class="result-title">Richtig!</h2>
+        <p id="result-guess" class="result-guess"></p>
+        <p id="result-word" class="result-word"></p>
+
+        <!-- Moderator / Host-Verdikt für TV-Spieler Modus -->
+        <div id="mod-verdict-btns" class="mod-verdict hidden">
+          <button id="btn-verdict-correct" class="btn-correct">
+            ✓ Richtig
+          </button>
+          <button id="btn-verdict-wrong" class="btn-wrong">✗ Falsch</button>
+        </div>
+
+        <!-- Host: Nächste Runde -->
+        <div id="host-next-controls" class="host-controls hidden">
+          <button id="btn-next-round" class="btn-primary">Nächste Runde</button>
+          <button id="btn-end-game" class="btn-secondary">Spiel beenden</button>
+        </div>
+        <p id="waiting-next-msg" class="waiting-msg">Warte auf den Host…</p>
+      </div>
+    </div>
+
+    <!-- Wortlisten + Spiellogik -->
+    <script src="assets/js/game.js"></script>
+  </body>
+</html>
