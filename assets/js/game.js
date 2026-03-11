@@ -160,6 +160,21 @@ function showScreen(name) {
   Object.entries(screens).forEach(([k, el]) =>
     el.classList.toggle("active", k === name),
   );
+
+  // Host-Abbruch-Button auf allen Spielscreens (nicht auf start/lobby/result)
+  const gameScreens = [
+    "clue",
+    "guesserWait",
+    "modReview",
+    "reveal",
+    "guess",
+    "tvWait",
+    "observer",
+  ];
+  if (State.isHost) {
+    injectHostAbortButton();
+    showHostAbortButton(gameScreens.includes(name));
+  }
 }
 
 function showToast(msg, duration = 3000) {
@@ -298,10 +313,84 @@ async function checkHostReconnect(uid) {
     State.tvUID = data.tvUID || null;
 
     showToast("🔄 Als Host wiederverbunden!");
+    startGlobalPhaseListener();
     enterLobbyScreen();
     return true;
   } catch (e) {
     log("Reconnect-Fehler:", e);
+    return false;
+  }
+}
+
+// ══════════════════════════════════════════════════════════════
+//  SPIELER-RECONNECT (war beim Spielstart dabei, Seite neu geladen)
+//  Prüft ob die UID noch in einer laufenden Lobby registriert ist
+//  und springt direkt in die aktuelle Spielphase.
+// ══════════════════════════════════════════════════════════════
+async function checkPlayerReconnect(uid) {
+  const savedCode = localStorage.getItem("onechance_player_lobby");
+  if (!savedCode) return false;
+  log("Spieler-Reconnect-Prüfung für Lobby:", savedCode);
+
+  try {
+    const snap = await State.db.ref(`lobbies/${savedCode}`).once("value");
+    if (!snap.exists()) {
+      localStorage.removeItem("onechance_player_lobby");
+      return false;
+    }
+
+    const data = snap.val();
+    const players = data.players || {};
+
+    // Spieler muss noch in der Spielerliste stehen
+    if (!players[uid]) {
+      log("UID nicht mehr in Lobby – kein Reconnect");
+      localStorage.removeItem("onechance_player_lobby");
+      return false;
+    }
+
+    // Nicht in der Lobby-Phase reconnecten (das ist normaler Beitritt)
+    if (data.phase === "lobby") {
+      log("Lobby-Phase – normaler Beitritt statt Reconnect");
+      return false;
+    }
+
+    log("Spieler-Reconnect erfolgreich! Phase:", data.phase);
+
+    // State wiederherstellen
+    State.lobbyCode = savedCode;
+    State.name = players[uid].name;
+    State.role = players[uid].role || "spieler";
+    State.isHost = data.host === uid;
+    State.hostUID = data.host;
+    State.isMod = uid === data.modUID;
+    State.isTV = uid === data.tvUID;
+    State.isViewer = State.role === "zuschauer";
+    State.maxPlayers = data.maxPlayers || 8;
+    State.category = data.category || "leicht";
+    State.modUID = data.modUID || null;
+    State.tvUID = data.tvUID || null;
+    State.secretWord = data.secretWord;
+    State.guesserUID = data.guesserUID;
+    State.isGuesser = uid === data.guesserUID;
+    State.clues = data.clues || {};
+    State.modStrikes = data.modStrikes || {};
+    State.players = players;
+    State.phase = data.phase;
+
+    // Name vorausfüllen
+    document.getElementById("input-name").value = State.name;
+
+    showToast("🔄 Wiederverbunden!");
+
+    // Globalen Phasen-Listener starten damit Host-Abbruch funktioniert
+    startGlobalPhaseListener();
+
+    // Direkt in die aktuelle Phase springen
+    handlePhaseChange(data.phase);
+    return true;
+  } catch (e) {
+    log("Spieler-Reconnect-Fehler:", e);
     return false;
   }
 }
@@ -349,6 +438,8 @@ async function joinOrCreateLobby(name, code, role) {
     State.modUID = data.modUID || null;
     State.tvUID = data.tvUID || null;
     log("Lobby beigetreten:", code);
+    // Reconnect-Code für Spieler speichern
+    localStorage.setItem("onechance_player_lobby", code);
   } else {
     const newCode = generateLobbyCode();
     await db.ref(`lobbies/${newCode}`).set({
@@ -371,6 +462,7 @@ async function joinOrCreateLobby(name, code, role) {
     State.isHost = true;
     State.hostUID = State.uid; // FIX: Host-UID cachen
     localStorage.setItem("onechance_lobby", newCode);
+    localStorage.setItem("onechance_player_lobby", newCode); // auch als Spieler speichern
     log("Neue Lobby:", newCode);
   }
 
@@ -488,6 +580,7 @@ function enterLobbyScreen() {
       if (snap.val() === true) {
         removeAllListeners();
         localStorage.removeItem("onechance_lobby");
+        localStorage.removeItem("onechance_player_lobby");
         State.lobbyCode = null;
         State.isHost = false;
         showScreen("start");
@@ -560,15 +653,24 @@ function enterLobbyScreen() {
     },
   );
 
-  // ── Phasenwechsel ──
-  addListener(
-    State.db.ref(`lobbies/${State.lobbyCode}/phase`),
-    "value",
-    (snap) => {
-      const phase = snap.val();
-      if (phase && phase !== "lobby") handlePhaseChange(phase);
-    },
-  );
+  // ── Phasenwechsel + Lobby-gelöscht ──
+  // Root-Listener: reagiert auf Phasenwechsel UND auf gelöschte Lobby
+  addListener(State.db.ref(`lobbies/${State.lobbyCode}`), "value", (snap) => {
+    if (!snap.exists()) {
+      // Lobby wurde vom Host gelöscht (endGame)
+      log("Lobby gelöscht während Lobby-Screen – zurück zum Start");
+      removeAllListeners();
+      localStorage.removeItem("onechance_lobby");
+      localStorage.removeItem("onechance_player_lobby");
+      State.lobbyCode = null;
+      State.isHost = false;
+      showScreen("start");
+      showToast("\uD83C\uDFC1 Lobby wurde vom Host geschlossen.");
+      return;
+    }
+    const phase = snap.val()?.phase;
+    if (phase && phase !== "lobby") handlePhaseChange(phase);
+  });
 
   showScreen("lobby");
 }
@@ -743,6 +845,10 @@ async function startGame() {
     guess: null,
     verdict: null,
   });
+
+  // Globaler Phasen-Listener für alle Clients starten
+  // (wird bei enterLobbyScreen via removeAllListeners gestoppt und neu gestartet)
+  startGlobalPhaseListener();
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -833,22 +939,43 @@ async function submitClue() {
 }
 
 function watchForAllCluesSubmitted() {
+  // Läuft bei ALLEN Wortgebern (inkl. Host falls er Wortgeber ist).
+  // Spielerzahl wird direkt aus Firebase gelesen – nicht aus lokalem State –
+  // damit der Vergleich auch nach einem Reload korrekt ist.
   addListener(
     State.db.ref(`lobbies/${State.lobbyCode}/clues`),
     "value",
     async (snap) => {
       const clues = snap.val() || {};
-      // Nur aktive, nicht-zuschauende, nicht-ratende Spieler müssen tippen
-      const givers = Object.entries(State.players).filter(
-        ([uid, p]) => p.role !== "zuschauer" && uid !== State.guesserUID,
+      const clueCount = Object.keys(clues).length;
+      if (clueCount === 0) return; // Initialer Reset beim Spielstart ignorieren
+
+      // Spielerliste frisch aus Firebase lesen (State.players kann veraltet sein)
+      const playersSnap = await State.db
+        .ref(`lobbies/${State.lobbyCode}/players`)
+        .once("value");
+      const players = playersSnap.val() || {};
+      const guesserUID = State.guesserUID;
+
+      // Wortgeber = alle aktiven Spieler OHNE Zuschauer und OHNE Rater
+      const givers = Object.entries(players).filter(
+        ([uid, p]) => p.role !== "zuschauer" && uid !== guesserUID,
       );
 
-      log(`Clues: ${Object.keys(clues).length}/${givers.length}`);
+      log(`Clues: ${clueCount}/${givers.length} – isHost: ${State.isHost}`);
 
-      if (Object.keys(clues).length >= givers.length && State.isHost) {
-        // Gibt es einen Moderator? → mod-review, sonst direkt reveal
+      // Nur der Host schreibt die Phase – aber jeder Client prüft
+      if (clueCount >= givers.length && givers.length > 0 && State.isHost) {
+        // Sicherstellen dass wir noch in der clue-Phase sind (kein Doppel-Trigger)
+        const phaseSnap = await State.db
+          .ref(`lobbies/${State.lobbyCode}/phase`)
+          .once("value");
+        if (phaseSnap.val() !== "clue") {
+          log("Phase bereits gewechselt – kein Doppel-Trigger");
+          return;
+        }
         const nextPhase = State.modUID ? "mod-review" : "reveal";
-        log("Alle Hinweise – weiter zu:", nextPhase);
+        log("Alle Hinweise eingegangen – wechsle zu:", nextPhase);
         await State.db
           .ref(`lobbies/${State.lobbyCode}`)
           .update({ phase: nextPhase, clues });
@@ -1336,11 +1463,101 @@ function renderResultScreen(guess, correct) {
 }
 
 // ══════════════════════════════════════════════════════════════
+//  GLOBALER PHASEN-LISTENER
+//  Läuft während des Spiels bei ALLEN Clients.
+//  Reagiert auf Phasenwechsel (inkl. Host-Abbruch zurück zu 'lobby').
+// ══════════════════════════════════════════════════════════════
+function startGlobalPhaseListener() {
+  log("Globaler Phasen-Listener gestartet");
+  // Auf den LOBBY-ROOT hören, nicht nur auf /phase –
+  // so feuert der Listener auch wenn die Lobby komplett gelöscht wird (snap = null)
+  addListener(State.db.ref(`lobbies/${State.lobbyCode}`), "value", (snap) => {
+    // ── Lobby gelöscht (endGame vom Host) ──
+    if (!snap.exists()) {
+      log("Lobby nicht mehr vorhanden – zurück zum Start-Screen");
+      removeAllListeners();
+      localStorage.removeItem("onechance_lobby");
+      localStorage.removeItem("onechance_player_lobby");
+      State.lobbyCode = null;
+      State.isHost = false;
+      showHostAbortButton(false);
+      showScreen("start");
+      showToast("\uD83C\uDFC1 Das Spiel wurde vom Host beendet.");
+      return;
+    }
+
+    const phase = snap.val()?.phase;
+    if (!phase) return;
+
+    // ── Host hat Runde abgebrochen → zurück zur Lobby ──
+    if (phase === "lobby" && State.phase !== "lobby") {
+      log("Phase zurück zu lobby – alle Clients in Lobby-Screen");
+      State.phase = "lobby";
+      removeAllListeners();
+      showHostAbortButton(false);
+      enterLobbyScreen();
+      return;
+    }
+
+    // ── Normaler Phasenwechsel ──
+    if (phase !== "lobby" && phase !== State.phase) {
+      handlePhaseChange(phase);
+    }
+  });
+}
+
+// ══════════════════════════════════════════════════════════════
+//  HOST: ZURÜCK ZUR LOBBY (jederzeit aus laufendem Spiel)
+// ══════════════════════════════════════════════════════════════
+async function forceBackToLobby() {
+  if (!State.isHost) return;
+  if (!confirm("Runde abbrechen und zurück zur Lobby?")) return;
+
+  log("Host bricht Runde ab – zurück zur Lobby");
+  // KEIN removeAllListeners() hier – die anderen Clients müssen den
+  // Phase-Wechsel auf 'lobby' noch via globalem Listener mitbekommen.
+  // Der Host kehrt selbst via enterLobbyScreen() zurück.
+
+  await State.db.ref(`lobbies/${State.lobbyCode}`).update({
+    phase: "lobby",
+    secretWord: null,
+    guesserUID: null,
+    clues: {},
+    modStrikes: {},
+    guess: null,
+    verdict: null,
+  });
+
+  setTimeout(() => enterLobbyScreen(), 200);
+}
+
+// ── Host-Abbruch-Overlay: wird auf allen Spielscreens angezeigt ──
+function injectHostAbortButton() {
+  // Nur einmal injizieren
+  if (document.getElementById("host-abort-btn")) return;
+
+  const btn = document.createElement("button");
+  btn.id = "host-abort-btn";
+  btn.textContent = "↩ Zur Lobby";
+  btn.title = "Runde abbrechen und zur Lobby";
+  btn.addEventListener("click", forceBackToLobby);
+  document.body.appendChild(btn);
+  log("Host-Abbruch-Button eingefügt");
+}
+
+function showHostAbortButton(visible) {
+  const btn = document.getElementById("host-abort-btn");
+  if (!btn) return;
+  btn.style.display = visible ? "block" : "none";
+}
+
+// ══════════════════════════════════════════════════════════════
 //  NÄCHSTE RUNDE / BEENDEN
 // ══════════════════════════════════════════════════════════════
 async function nextRound() {
   log("Nächste Runde");
   removeAllListeners();
+  showHostAbortButton(false);
   await State.db.ref(`lobbies/${State.lobbyCode}`).update({
     phase: "lobby",
     secretWord: null,
@@ -1356,8 +1573,10 @@ async function nextRound() {
 async function endGame() {
   log("Spiel beenden");
   removeAllListeners();
+  showHostAbortButton(false);
   await State.db.ref(`lobbies/${State.lobbyCode}`).remove();
   localStorage.removeItem("onechance_lobby");
+  localStorage.removeItem("onechance_player_lobby");
   State.lobbyCode = null;
   State.isHost = false;
   showScreen("start");
@@ -1577,10 +1796,13 @@ document.getElementById("btn-end-game").addEventListener("click", endGame);
     showToast(`🎮 Lobby ${lobbyParam} – Namen eingeben und beitreten!`);
   }
 
-  // Host-Reconnect (nur ohne URL-Parameter)
+  // Host-Reconnect oder Spieler-Reconnect (nur ohne URL-Parameter)
   if (!lobbyParam) {
-    const reconnected = await checkHostReconnect(State.uid);
-    if (reconnected) return;
+    const hostReconnected = await checkHostReconnect(State.uid);
+    if (hostReconnected) return;
+
+    const playerReconnected = await checkPlayerReconnect(State.uid);
+    if (playerReconnected) return;
   }
 
   showScreen("start");
