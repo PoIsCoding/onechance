@@ -2,7 +2,7 @@
 
 > Das kooperative Multiplayer-Wort-Ratespiel für den Browser
 
-[![GitHub Pages](https://img.shields.io/badge/GitHub%20Pages-Live-brightgreen)](https://DEIN-USER.github.io/one-chance/)
+[![GitHub Pages](https://img.shields.io/badge/GitHub%20Pages-Live-brightgreen)](https://poiscoding.github.io/onechance/)
 [![Version](https://img.shields.io/badge/Version-1.1.0-blue)](#)
 [![Lizenz](https://img.shields.io/badge/Lizenz-MIT-lightgrey)](#)
 
@@ -35,17 +35,16 @@ one-chance/
 
 > GitHub Pages benötigt `index.html` im Root – alle anderen Dateien liegen in `assets/`.
 
-
 ---
 
 ## 🛠️ Technologien
 
-| Technologie | Zweck |
-|---|---|
-| Vanilla HTML / CSS / JS | Kein Build-Prozess nötig |
-| Firebase Realtime Database | Echtzeit-Multiplayer-Synchronisierung |
-| Google Fonts (Syne + DM Sans) | Typografie |
-| GitHub Pages | Kostenloses statisches Hosting |
+| Technologie                   | Zweck                                 |
+| ----------------------------- | ------------------------------------- |
+| Vanilla HTML / CSS / JS       | Kein Build-Prozess nötig              |
+| Firebase Realtime Database    | Echtzeit-Multiplayer-Synchronisierung |
+| Google Fonts (Syne + DM Sans) | Typografie                            |
+| GitHub Pages                  | Kostenloses statisches Hosting        |
 
 ---
 

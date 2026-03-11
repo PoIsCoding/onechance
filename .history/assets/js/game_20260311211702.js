@@ -87,9 +87,8 @@ const State = {
   clues: {},
   modStrikes: {}, // vom Mod manuell gestrichene Clue-UIDs
   db: null,
-  listeners: [], // normale Listener – werden bei Phasenwechsel geleert
-  _centralRef: null, // Firebase-Ref des zentralen Listeners (nie in listeners[])
-  _centralFn: null, // Callback des zentralen Listeners
+  listeners: [],
+  _globalListenerActive: false, // Guard für startGlobalPhaseListener
 };
 
 // ── DOM-Referenzen ─────────────────────────────────────────────
@@ -202,21 +201,10 @@ function generateLobbyCode() {
 }
 
 function removeAllListeners() {
-  // Normale Listener entfernen (Lobby-Details, Clues, etc.)
-  // Der zentrale Root-Listener (_centralRef) bleibt aktiv – er überlebt Phasenwechsel!
   State.listeners.forEach(({ ref, event, fn }) => ref.off(event, fn));
   State.listeners = [];
-  log("Normale Listener entfernt (zentraler Listener bleibt aktiv)");
-}
-
-function removeCentralListener() {
-  // Nur beim echten Verlassen der Lobby aufrufen (Start-Screen).
-  if (State._centralRef && State._centralFn) {
-    State._centralRef.off("value", State._centralFn);
-    State._centralRef = null;
-    State._centralFn = null;
-    log("Zentraler Listener entfernt");
-  }
+  State._globalListenerActive = false; // Guard zurücksetzen
+  log("Alle Listener entfernt");
 }
 
 function addListener(ref, event, fn) {
@@ -327,7 +315,8 @@ async function checkHostReconnect(uid) {
     State.tvUID = data.tvUID || null;
 
     showToast("🔄 Als Host wiederverbunden!");
-    enterLobbyScreen(); // enterLobbyScreen ruft startCentralListener() selbst auf
+    startGlobalPhaseListener();
+    enterLobbyScreen();
     return true;
   } catch (e) {
     log("Reconnect-Fehler:", e);
@@ -397,7 +386,7 @@ async function checkPlayerReconnect(uid) {
     showToast("🔄 Wiederverbunden!");
 
     // Globalen Phasen-Listener starten damit Host-Abbruch funktioniert
-    startCentralListener();
+    startGlobalPhaseListener();
 
     // Direkt in die aktuelle Phase springen
     handlePhaseChange(data.phase);
@@ -591,7 +580,6 @@ function enterLobbyScreen() {
     "value",
     (snap) => {
       if (snap.val() === true) {
-        removeCentralListener();
         removeAllListeners();
         localStorage.removeItem("onechance_lobby");
         localStorage.removeItem("onechance_player_lobby");
@@ -667,9 +655,24 @@ function enterLobbyScreen() {
     },
   );
 
-  // ── Zentraler Root-Listener (Spielstart + Lobby-gelöscht) ──
-  // startCentralListener() verwaltet EINEN einzigen Listener für alle Events.
-  startCentralListener();
+  // ── Phasenwechsel + Lobby-gelöscht ──
+  // Root-Listener: reagiert auf Phasenwechsel UND auf gelöschte Lobby
+  addListener(State.db.ref(`lobbies/${State.lobbyCode}`), "value", (snap) => {
+    if (!snap.exists()) {
+      // Lobby wurde vom Host gelöscht (endGame)
+      log("Lobby gelöscht während Lobby-Screen – zurück zum Start");
+      removeAllListeners();
+      localStorage.removeItem("onechance_lobby");
+      localStorage.removeItem("onechance_player_lobby");
+      State.lobbyCode = null;
+      State.isHost = false;
+      showScreen("start");
+      showToast("\uD83C\uDFC1 Lobby wurde vom Host geschlossen.");
+      return;
+    }
+    const phase = snap.val()?.phase;
+    if (phase && phase !== "lobby") handlePhaseChange(phase);
+  });
 
   showScreen("lobby");
 }
@@ -847,7 +850,7 @@ async function startGame() {
 
   // Globaler Phasen-Listener für alle Clients starten
   // (wird bei enterLobbyScreen via removeAllListeners gestoppt und neu gestartet)
-  startCentralListener();
+  startGlobalPhaseListener();
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -855,6 +858,10 @@ async function startGame() {
 // ══════════════════════════════════════════════════════════════
 async function handlePhaseChange(phase) {
   log("Phase:", phase);
+
+  // Globalen Listener sicherstellen – für JEDEN Client bei JEDEM Phasenwechsel.
+  // startGlobalPhaseListener() prüft selbst ob er bereits läuft (Guard-Flag).
+  startGlobalPhaseListener();
 
   const snap = await State.db.ref(`lobbies/${State.lobbyCode}`).once("value");
   const data = snap.val();
@@ -1261,11 +1268,14 @@ function watchCluesForObserver() {
   );
 }
 
-function watchForPhase(_targetPhase) {
-  // Leer – der zentrale Listener (startCentralListener) reagiert bereits
-  // auf alle Phasenwechsel. Diese Funktion bleibt als No-Op erhalten
-  // damit bestehende Aufrufe keinen Fehler werfen.
-  log("watchForPhase: zentraler Listener übernimmt –", _targetPhase);
+function watchForPhase(targetPhase) {
+  addListener(
+    State.db.ref(`lobbies/${State.lobbyCode}/phase`),
+    "value",
+    (snap) => {
+      if (snap.val() === targetPhase) handlePhaseChange(targetPhase);
+    },
+  );
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -1464,27 +1474,17 @@ function renderResultScreen(guess, correct) {
 //  Läuft während des Spiels bei ALLEN Clients.
 //  Reagiert auf Phasenwechsel (inkl. Host-Abbruch zurück zu 'lobby').
 // ══════════════════════════════════════════════════════════════
-//  ZENTRALER LOBBY-LISTENER
-//  EIN einziger Root-Listener pro Lobby-Session für ALLE Clients.
-//  Reagiert auf: Spielstart, Phasenwechsel, Abbruch, Lobby-Löschung.
-//  Wird in enterLobbyScreen() gestartet und läuft durch alle Phasen.
-// ══════════════════════════════════════════════════════════════
-function startCentralListener() {
-  // Guard: nur einmal pro Lobby registrieren.
-  // Überlebt removeAllListeners() – wird nur durch removeCentralListener() gestoppt.
-  if (State._centralFn) {
-    log("Zentraler Listener läuft bereits – kein Doppel-Start");
-    return;
-  }
-
-  log("Zentraler Listener gestartet für Lobby:", State.lobbyCode);
-  const ref = State.db.ref(`lobbies/${State.lobbyCode}`);
-
-  const fn = (snap) => {
-    // ── Lobby gelöscht (closeLobby / endGame vom Host) ──
+function startGlobalPhaseListener() {
+  // Guard: nur einmal pro Lobby registrieren
+  if (State._globalListenerActive) return;
+  State._globalListenerActive = true;
+  log("Globaler Phasen-Listener gestartet");
+  // Auf den LOBBY-ROOT hören, nicht nur auf /phase –
+  // so feuert der Listener auch wenn die Lobby komplett gelöscht wird (snap = null)
+  addListener(State.db.ref(`lobbies/${State.lobbyCode}`), "value", (snap) => {
+    // ── Lobby gelöscht (endGame vom Host) ──
     if (!snap.exists()) {
-      log("Lobby nicht mehr vorhanden – alle zurück zum Start");
-      removeCentralListener();
+      log("Lobby nicht mehr vorhanden – zurück zum Start-Screen");
       removeAllListeners();
       localStorage.removeItem("onechance_lobby");
       localStorage.removeItem("onechance_player_lobby");
@@ -1492,35 +1492,28 @@ function startCentralListener() {
       State.isHost = false;
       showHostAbortButton(false);
       showScreen("start");
-      showToast("Lobby wurde geschlossen.");
+      showToast("\uD83C\uDFC1 Das Spiel wurde vom Host beendet.");
       return;
     }
 
-    const data = snap.val();
-    const phase = data?.phase;
+    const phase = snap.val()?.phase;
     if (!phase) return;
 
-    // ── Phase zurück zu lobby (forceBackToLobby / nextRound) ──
-    if (phase === "lobby" && State.phase && State.phase !== "lobby") {
-      log("Phase → lobby: alle Clients zurück in Lobby-Screen");
+    // ── Host hat Runde abgebrochen → zurück zur Lobby ──
+    if (phase === "lobby" && State.phase !== "lobby") {
+      log("Phase zurück zu lobby – alle Clients in Lobby-Screen");
       State.phase = "lobby";
-      removeAllListeners(); // normale Listener leeren (zentraler bleibt!)
+      removeAllListeners();
       showHostAbortButton(false);
-      enterLobbyScreen(); // registriert neue normale Listener
+      enterLobbyScreen();
       return;
     }
 
-    // ── Normaler Phasenwechsel (clue / reveal / guess / result / ...) ──
+    // ── Normaler Phasenwechsel ──
     if (phase !== "lobby" && phase !== State.phase) {
       handlePhaseChange(phase);
     }
-  };
-
-  // Direkt bei Firebase registrieren – NICHT über addListener(),
-  // damit removeAllListeners() ihn nicht entfernt.
-  ref.on("value", fn);
-  State._centralRef = ref;
-  State._centralFn = fn;
+  });
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -1589,31 +1582,8 @@ async function nextRound() {
 
 async function endGame() {
   log("Spiel beenden");
-  removeCentralListener(); // Host verlässt – zentralen Listener stoppen
   removeAllListeners();
   showHostAbortButton(false);
-  await State.db.ref(`lobbies/${State.lobbyCode}`).remove();
-  localStorage.removeItem("onechance_lobby");
-  localStorage.removeItem("onechance_player_lobby");
-  State.lobbyCode = null;
-  State.isHost = false;
-  showScreen("start");
-}
-
-async function closeLobby() {
-  // Host schließt die Lobby komplett – alle Clients landen auf dem Start-Screen.
-  // Das Löschen des Firebase-Nodes triggert den zentralen Listener bei allen Clients.
-  if (!State.isHost) return;
-  if (
-    !confirm(
-      "Lobby wirklich schließen? Alle Spieler werden zurück zum Start gesetzt.",
-    )
-  )
-    return;
-
-  log("Host schließt Lobby:", State.lobbyCode);
-  removeCentralListener(); // zentralen Listener zuerst stoppen (Host braucht ihn nicht mehr)
-  removeAllListeners();
   await State.db.ref(`lobbies/${State.lobbyCode}`).remove();
   localStorage.removeItem("onechance_lobby");
   localStorage.removeItem("onechance_player_lobby");
@@ -1773,11 +1743,6 @@ document
 
 // Spiel starten
 document.getElementById("btn-start").addEventListener("click", startGame);
-
-// Lobby schließen (Host)
-document
-  .getElementById("btn-close-lobby")
-  .addEventListener("click", closeLobby);
 
 // Hinweis
 document
