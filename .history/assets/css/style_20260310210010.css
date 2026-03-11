@@ -1287,31 +1287,3 @@ input[type="range"]::-moz-range-thumb {
   background: rgba(255, 107, 107, 0.15);
   border-color: var(--accent2);
 }
-
-/* ══════════════════════════════════════════════════════════════
-   LEAVE-BUTTON (floating, Nicht-Hosts auf Spielscreens)
-   ══════════════════════════════════════════════════════════════ */
-#leave-game-btn {
-  display: none;
-  position: fixed;
-  top: 14px;
-  right: 14px;
-  z-index: 150;
-  background: rgba(21, 24, 38, 0.85);
-  border: 1.5px solid rgba(255, 107, 107, 0.35);
-  color: var(--accent2);
-  font-family: var(--font-body);
-  font-size: 13px;
-  font-weight: 600;
-  padding: 8px 14px;
-  border-radius: 8px;
-  cursor: pointer;
-  backdrop-filter: blur(8px);
-  transition:
-    background 0.2s,
-    border-color 0.2s;
-}
-#leave-game-btn:hover {
-  background: rgba(255, 107, 107, 0.15);
-  border-color: var(--accent2);
-}

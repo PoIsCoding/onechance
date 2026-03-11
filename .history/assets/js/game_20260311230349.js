@@ -1669,11 +1669,7 @@ async function closeLobby() {
 async function leaveGame() {
   // Nur für Nicht-Hosts – Host benutzt "Lobby schließen"
   if (State.isHost) return;
-  // In der Lobby: direkt raus ohne Bestätigung
-  // Im laufenden Spiel: kurze Bestätigung (Rater-Abgang hat Konsequenzen für alle)
-  if (State.phase && State.phase !== "lobby") {
-    if (!confirm("Spiel wirklich verlassen?")) return;
-  }
+  if (!confirm("Lobby wirklich verlassen?")) return;
 
   log("Spieler verlässt:", State.uid, "| Phase:", State.phase);
 
