@@ -88,6 +88,7 @@ const State = {
   modStrikes: {}, // vom Mod manuell gestrichene Clue-UIDs
   db: null,
   listeners: [],
+  _globalListenerActive: false, // Guard für startGlobalPhaseListener
 };
 
 // ── DOM-Referenzen ─────────────────────────────────────────────
@@ -202,6 +203,7 @@ function generateLobbyCode() {
 function removeAllListeners() {
   State.listeners.forEach(({ ref, event, fn }) => ref.off(event, fn));
   State.listeners = [];
+  State._globalListenerActive = false; // Guard zurücksetzen
   log("Alle Listener entfernt");
 }
 
@@ -856,6 +858,11 @@ async function startGame() {
 // ══════════════════════════════════════════════════════════════
 async function handlePhaseChange(phase) {
   log("Phase:", phase);
+
+  // Globalen Listener sicherstellen – für JEDEN Client bei JEDEM Phasenwechsel.
+  // startGlobalPhaseListener() prüft selbst ob er bereits läuft (Guard-Flag).
+  startGlobalPhaseListener();
+
   const snap = await State.db.ref(`lobbies/${State.lobbyCode}`).once("value");
   const data = snap.val();
 
@@ -1468,6 +1475,9 @@ function renderResultScreen(guess, correct) {
 //  Reagiert auf Phasenwechsel (inkl. Host-Abbruch zurück zu 'lobby').
 // ══════════════════════════════════════════════════════════════
 function startGlobalPhaseListener() {
+  // Guard: nur einmal pro Lobby registrieren
+  if (State._globalListenerActive) return;
+  State._globalListenerActive = true;
   log("Globaler Phasen-Listener gestartet");
   // Auf den LOBBY-ROOT hören, nicht nur auf /phase –
   // so feuert der Listener auch wenn die Lobby komplett gelöscht wird (snap = null)
