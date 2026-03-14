@@ -1,0 +1,15 @@
+{
+  "rules": {
+    "lobbies": {
+      "$lobbyCode": {
+        ".read": "data.child('players').child(auth.uid).exists() || data.child('host').val() === auth.uid",
+        ".write": true
+      }
+    },
+
+    "stats": {
+      ".read": "auth != null && auth.uid === 'DEINE_GOOGLE_UID'",
+      ".write": true
+    }
+  }
+}
