@@ -976,7 +976,9 @@ function watchForAllCluesSubmitted() {
       const modUID = State.modUID;
       const givers = Object.entries(players).filter(
         ([uid, p]) =>
-          p.role !== "zuschauer" && uid !== guesserUID && uid !== modUID,
+          p.role !== "zuschauer" &&
+          uid !== guesserUID &&
+          uid !== modUID,
       );
 
       log(`Clues: ${clueCount}/${givers.length} – isHost: ${State.isHost}`);
@@ -1121,25 +1123,22 @@ async function enterRevealPhase() {
   State.modStrikes = data.modStrikes || {};
 
   const allEntries = Object.entries(State.clues);
-  const duplicates = findDuplicates(allEntries.map(([, t]) => t));
+  const duplicates  = findDuplicates(allEntries.map(([, t]) => t));
 
   // Hinweise die das Geheimwort enthalten (oder darin enthalten sind) → auch streichen
   const secretHits = new Set(
     allEntries
       .filter(([, t]) => isContainedInSecretWord(t, State.secretWord))
-      .map(([, t]) => normalizeClue(t)),
+      .map(([, t]) => normalizeClue(t))
   );
 
   // Alle automatisch zu streichenden Texte zusammenfassen
   const autoStrike = new Set([...duplicates, ...secretHits]);
 
   log(
-    "Duplikate:",
-    [...duplicates],
-    "| Geheimwort-Treffer:",
-    [...secretHits],
-    "| Mod-Strikes:",
-    Object.keys(State.modStrikes),
+    "Duplikate:", [...duplicates],
+    "| Geheimwort-Treffer:", [...secretHits],
+    "| Mod-Strikes:", Object.keys(State.modStrikes),
   );
 
   const list = document.getElementById("clue-list");
@@ -1195,7 +1194,7 @@ function findDuplicates(texts) {
 // Außerdem: Gesucht "Kuchen" → "Käsekuchen" als Hinweis würde ebenfalls gestrichen.
 function isContainedInSecretWord(clueText, secretWord) {
   if (!secretWord) return false;
-  const clue = normalizeClue(clueText);
+  const clue   = normalizeClue(clueText);
   const secret = normalizeClue(secretWord);
   // Hinweis ist Teilstring des Geheimworts ODER Geheimwort ist Teilstring des Hinweises
   return secret.includes(clue) || clue.includes(secret);
@@ -1249,9 +1248,9 @@ async function proceedToGuess() {
   // Valide Hinweise: nicht doppelt, kein Geheimwort-Treffer, nicht vom Mod gestrichen
   const validClues = {};
   Object.entries(clues).forEach(([uid, text]) => {
-    const isDupe = dupes.has(normalizeClue(text));
-    const isSecretHit = isContainedInSecretWord(text, data.secretWord);
-    const isStruck = !!strikes[uid];
+    const isDupe       = dupes.has(normalizeClue(text));
+    const isSecretHit  = isContainedInSecretWord(text, data.secretWord);
+    const isStruck     = !!strikes[uid];
     if (!isDupe && !isSecretHit && !isStruck) validClues[uid] = text;
   });
 
@@ -1357,19 +1356,16 @@ async function enterGuessPhase() {
       // Alle Hinweise wurden gestrichen – besondere Nachricht
       const li = document.createElement("li");
       li.textContent = "😬 Alle Hinweise wurden gestrichen – viel Glück!";
-      li.style.cssText =
-        "color:var(--accent2);font-style:italic;list-style:none;text-align:center";
+      li.style.cssText = "color:var(--accent2);font-style:italic;list-style:none;text-align:center";
       list.appendChild(li);
-      document.querySelector("#screen-guess .round-label").textContent =
-        "Keine Hinweise übrig:";
+      document.querySelector("#screen-guess .round-label").textContent = "Keine Hinweise übrig:";
     } else {
       validClues.forEach((text) => {
         const li = document.createElement("li");
         li.textContent = text;
         list.appendChild(li);
       });
-      document.querySelector("#screen-guess .round-label").textContent =
-        "Deine Hinweise:";
+      document.querySelector("#screen-guess .round-label").textContent = "Deine Hinweise:";
     }
 
     document.getElementById("input-guess").value = "";
@@ -1582,13 +1578,13 @@ function startCentralListener() {
       log("Rater nicht mehr in der Lobby – alle zurück zur Lobby");
       (async () => {
         await State.db.ref(`lobbies/${State.lobbyCode}`).update({
-          phase: "lobby",
+          phase:      "lobby",
           secretWord: null,
           guesserUID: null,
-          clues: {},
+          clues:      {},
           modStrikes: {},
-          guess: null,
-          verdict: null,
+          guess:      null,
+          verdict:    null,
         });
         showToast("🚶 Der Rater hat die Lobby verlassen – zurück zur Lobby.");
       })();
@@ -1667,7 +1663,15 @@ function showHostAbortButton(visible) {
 //  NÄCHSTE RUNDE / BEENDEN
 // ══════════════════════════════════════════════════════════════
 async function nextRound() {
-  log("Nächste Runde");
+  // Startet direkt eine neue Runde ohne zurück in die Lobby zu gehen
+  log("Nächste Runde – direkt starten");
+  showHostAbortButton(false);
+  await startGame(); // startGame() wählt neues Wort und setzt Phase auf clue
+}
+
+async function backToLobby() {
+  // Zurück zur Lobby – alle Spieler landen auf dem Lobby-Screen
+  log("Zurück zur Lobby");
   removeAllListeners();
   showHostAbortButton(false);
   await State.db.ref(`lobbies/${State.lobbyCode}`).update({
@@ -1732,8 +1736,8 @@ async function leaveGame() {
   log("Spieler verlässt:", State.uid, "| Phase:", State.phase);
 
   const lobbyCode = State.lobbyCode;
-  const uid = State.uid;
-  const phase = State.phase;
+  const uid       = State.uid;
+  const phase     = State.phase;
   const wasGuesser = State.isGuesser;
 
   // Eigene Listeners stoppen
@@ -1754,21 +1758,21 @@ async function leaveGame() {
   if (wasGuesser) {
     log("Rater verlässt – alle zurück zur Lobby");
     await State.db.ref(`lobbies/${lobbyCode}`).update({
-      phase: "lobby",
+      phase:      "lobby",
       secretWord: null,
       guesserUID: null,
-      clues: {},
+      clues:      {},
       modStrikes: {},
-      guess: null,
-      verdict: null,
+      guess:      null,
+      verdict:    null,
     });
   }
 
   // Eigenen State bereinigen
   localStorage.removeItem("onechance_player_lobby");
-  State.lobbyCode = null;
-  State.isHost = false;
-  State.isGuesser = false;
+  State.lobbyCode  = null;
+  State.isHost     = false;
+  State.isGuesser  = false;
   showScreen("start");
 }
 
@@ -1776,9 +1780,9 @@ async function leaveGame() {
 function injectLeaveButton() {
   if (document.getElementById("leave-game-btn")) return;
   const btn = document.createElement("button");
-  btn.id = "leave-game-btn";
+  btn.id          = "leave-game-btn";
   btn.textContent = "↩ Verlassen";
-  btn.title = "Spiel verlassen";
+  btn.title       = "Spiel verlassen";
   btn.addEventListener("click", leaveGame);
   document.body.appendChild(btn);
   log("Leave-Button eingefügt");
@@ -1981,6 +1985,7 @@ document
 
 // Nächste Runde / Beenden
 document.getElementById("btn-next-round").addEventListener("click", nextRound);
+document.getElementById("btn-back-lobby").addEventListener("click", backToLobby);
 document.getElementById("btn-end-game").addEventListener("click", endGame);
 
 // ══════════════════════════════════════════════════════════════

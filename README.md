@@ -3,7 +3,7 @@
 > Das kooperative Multiplayer-Wort-Ratespiel für den Browser
 
 [![GitHub Pages](https://img.shields.io/badge/GitHub%20Pages-Live-brightgreen)](https://poiscoding.github.io/onechance/)
-[![Version](https://img.shields.io/badge/Version-1.4.5.1-blue)](#)
+[![Version](https://img.shields.io/badge/Version-1.4.6-blue)](#)
 [![Lizenz](https://img.shields.io/badge/Lizenz-Custom-lightgrey)](LICENSE)
 
 ---
