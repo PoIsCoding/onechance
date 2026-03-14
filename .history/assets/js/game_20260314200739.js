@@ -1595,7 +1595,7 @@ function renderResultScreen(guess, correct) {
 // ══════════════════════════════════════════════════════════════
 //  INAKTIVITÄTS-TIMER (Auto-Close nach 30 min ohne Aktivität)
 // ══════════════════════════════════════════════════════════════
-const INACTIVITY_MS = 30 * 60 * 1000; // 30 Minuten
+const INACTIVITY_MS = 1 * 60 * 1000; // 30 Minuten
 
 // Schreibt den aktuellen Timestamp nach Firebase – bei jeder relevanten Aktion aufrufen
 async function touchActivity() {
