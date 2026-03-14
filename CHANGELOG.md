@@ -5,10 +5,21 @@ Format: [Semantische Versionierung](https://semver.org/lang/de/) `vMAJOR.MINOR.P
 
 ---
 
+## [v1.6.1] – 2026-03-14
+
+### Neu
+- **Audio-Sounds** (Dateien unter `assets/audio/`):
+  - `Achtung_es_geht_los.mp3` → TV-Gerät beim Start des Countdowns
+  - `du_darfst_jetzt_hinweise_sehen.mp3` → TV-Gerät nach der Reveal-Animation
+  - `alleine.mp3` → Ratender wenn alle Hinweise gestrichen wurden
+  - `win.mp3` → Ratender bei richtiger Antwort
+  - `fail.mp3` → Ratender bei falscher Antwort
+
+---
+
 ## [v1.6.0] – 2026-03-14
 
 ### TV-Modus komplett überarbeitet
-
 - **Clue-Phase**: TV-Screen zeigt das Geheimwort groß + live Tipp-Counter („3 / 4 eingegangen")
 - **Mod-Review**: TV-Screen zeigt Warte-Screen mit Hinweis „Moderator prüft"
 - **Reveal**: Animation läuft auf dem TV-Screen (für alle im Raum sichtbar)
@@ -20,7 +31,6 @@ Format: [Semantische Versionierung](https://semver.org/lang/de/) `vMAJOR.MINOR.P
 ## [v1.5.0] – 2026-03-14
 
 ### Neu
-
 - **Auto-Close nach Inaktivität**: Lobbys schließen sich automatisch nach 30 Minuten ohne Aktivität. Der Host prüft minütlich den `lastActivity`-Timestamp in Firebase. Alle Spieler erhalten den Toast „⏱ Lobby wurde wegen Inaktivität geschlossen." Aktivität wird bei Spielstart, Hinweis-Abgabe und Antwort registriert.
 
 ---
@@ -28,7 +38,6 @@ Format: [Semantische Versionierung](https://semver.org/lang/de/) `vMAJOR.MINOR.P
 ## [v1.4.9] – 2026-03-14
 
 ### Neu
-
 - **Kreuz-Treffer zwischen Hinweisen**: Ist ein Hinweis in einem anderen enthalten, werden beide gestrichen. Beispiel: „Luft" und „Luftblase" → beide weg, weil „Luft" in „Luftblase" vorkommt.
 
 ---
@@ -36,7 +45,6 @@ Format: [Semantische Versionierung](https://semver.org/lang/de/) `vMAJOR.MINOR.P
 ## [v1.4.8] – 2026-03-14
 
 ### Neu
-
 - **Rater-Rotation**: Jeder Spieler ist einmal Rater bevor sich jemand wiederholt. Die Queue wird in Firebase gespeichert und bei jeder Runde aktualisiert. Neu beitretende Spieler werden automatisch in die Queue aufgenommen. Zurück zur Lobby setzt die Queue zurück.
 
 ---
@@ -44,7 +52,6 @@ Format: [Semantische Versionierung](https://semver.org/lang/de/) `vMAJOR.MINOR.P
 ## [v1.4.7] – 2026-03-14
 
 ### Neu
-
 - **Mobile 9:16 Optimierung**: Karte füllt auf kleinen Displays (≤ 480px) den gesamten Viewport – kein ungenutzter Rand mehr
 - **iOS Safe Area**: Unterstützung für Notch & Dynamic Island (padding-top/bottom via `env(safe-area-inset-*)`)
 - **`viewport-fit=cover`**: Verhindert weiße Balken auf iPhone mit abgerundeten Ecken
@@ -56,7 +63,6 @@ Format: [Semantische Versionierung](https://semver.org/lang/de/) `vMAJOR.MINOR.P
 ## [v1.4.6] – 2026-03-14
 
 ### Neu
-
 - **Ergebnis-Screen**: Drei Buttons für den Host nach einer Runde:
   - **▶ Nächste Runde** – startet sofort eine neue Runde (neues Wort, gleiche Lobby)
   - **↩ Zurück zur Lobby** – alle landen auf dem Lobby-Screen (bisheriges Verhalten von „Nächste Runde")
@@ -67,7 +73,6 @@ Format: [Semantische Versionierung](https://semver.org/lang/de/) `vMAJOR.MINOR.P
 ## [v1.4.5.1] – 2026-03-14
 
 ### Fix
-
 - **Ergebnis-Screen**: „Das gesuchte Wort war: …" wird bei richtiger Antwort nun zuverlässig ausgeblendet – `result-word` ist jetzt standardmäßig im HTML versteckt und wird nur bei falscher Antwort eingeblendet
 
 ---
@@ -75,7 +80,6 @@ Format: [Semantische Versionierung](https://semver.org/lang/de/) `vMAJOR.MINOR.P
 ## [v1.4.5] – 2026-03-11
 
 ### Neu
-
 - **GitHub & Buy Me a Coffee Links** auf Start- und Ergebnis-Screen
 - **Leere Hinweisliste**: Wenn alle Hinweise gestrichen wurden, sieht der Rater „😬 Alle Hinweise wurden gestrichen – viel Glück!" statt einer leeren Liste
 - **Ergebnis-Screen**: „Das gesuchte Wort war: …" wird bei richtiger Antwort ausgeblendet – das Wort steht bereits in der Antwort
@@ -86,7 +90,6 @@ Format: [Semantische Versionierung](https://semver.org/lang/de/) `vMAJOR.MINOR.P
 ## [v1.4.4] – 2026-03-11
 
 ### Neu
-
 - **Groß-/Kleinschreibung bei Duplikaten**: „Schatten" und „SCHATTEN" werden jetzt als identisch erkannt und beide gestrichen
 - **Geheimwort-Treffer automatisch streichen**: Hinweise die das gesuchte Wort enthalten (z.B. „Kuchen" bei Gesucht: „Käsekuchen") oder im Geheimwort enthalten sind werden animiert gestrichen und nicht an den Rater weitergegeben
 
@@ -95,14 +98,12 @@ Format: [Semantische Versionierung](https://semver.org/lang/de/) `vMAJOR.MINOR.P
 ## [v1.4.3] – 2026-03-11
 
 ### Neu
-
 - **Lobby/Spiel verlassen** für Spieler & Zuschauer: „↩ Verlassen"-Button erscheint floating auf allen Spielscreens sowie als fixer Button im Lobby-Screen
 - **In der Lobby**: direkt verlassen ohne Bestätigung – im laufenden Spiel kurze Bestätigung
 - **Tippgeber verlässt Clue-Phase**: sein Hinweis wird gelöscht, Zähler neu geprüft – die Gruppe wartet nicht mehr auf ihn
 - **Rater verlässt laufendes Spiel**: alle Clients werden automatisch zurück in die Lobby gesetzt (Toast: „🚶 Der Rater hat die Lobby verlassen")
 
 ### Fixes
-
 - **Moderator zählt nicht zum Spielerlimit**: Limit-Check, Lobby-Zähler und Start-Button schließen den Mod korrekt aus
 - **Mod-Review springt nicht an**: Wortgeber-Zähler schloss den Moderator nicht aus – nun korrekt gefiltert
 
@@ -111,7 +112,6 @@ Format: [Semantische Versionierung](https://semver.org/lang/de/) `vMAJOR.MINOR.P
 ## [v1.4.2] – 2026-03-11
 
 ### Fixes & Verbesserungen
-
 - **„↩ Zur Lobby"-Button** (floating, nur für Host): Bricht die laufende Runde ab und bringt alle Clients zurück in die Lobby
 - **„Lobby schließen"-Button** im Lobby-Screen: Löscht die Lobby komplett – alle Spieler landen auf dem Start-Screen mit Toast „🚪 Die Lobby wurde vom Host geschlossen."
 - **Zentraler Listener-Refactor**: `startCentralListener()` läuft außerhalb von `State.listeners[]` und überlebt Phasenwechsel – alle Clients reagieren zuverlässig auf Lobby-Löschung und Abbruch ohne manuellen Reload
@@ -123,26 +123,22 @@ Format: [Semantische Versionierung](https://semver.org/lang/de/) `vMAJOR.MINOR.P
 ## [v1.4.0] – 2026-03-11
 
 ### Neu: Rollen
-
 - **Zuschauer**: Spieler können beim Beitreten "Zuschauer" wählen. Sie sehen in Echtzeit das Geheimwort und alle Eingaben. Sie zählen nicht zum Spielerlimit.
 - **Moderator**: Host kann einen Spieler als Moderator setzen. Moderatoren sehen alles wie Zuschauer, können aber nach der Clue-Phase manuell Hinweise streichen (Regelverstoß). Erst nach ihrer Bestätigung sehen Wortgeber die Animations-Phase.
 - **TV-Spieler**: Host markiert einen Spieler als TV-Spieler. Dieser rät immer (nie Wortgeber), sieht erst nach der Reveal-Animation die Hinweise und sitzt mit dem Rücken zum Fernseher. Richtig/Falsch wird durch Mod oder Host bestätigt.
 
 ### Neu: Spielmechanik
-
 - **Moderator-Prüfungsphase** (`mod-review`): Wenn ein Moderator existiert, kommt nach der Clue-Phase ein eigener Screen für den Mod zum manuellen Streichen von Hinweisen.
 - **Automatische Weiterleitung** nach Reveal: Countdown-Ring (5 Sek.) ersetzt den "Weiter"-Button – kein Admin-Klick mehr nötig.
 - **Verdikt-System** (TV-Modus): Moderator (oder Host) sieht "✓ Richtig / ✗ Falsch" Buttons und entscheidet das Ergebnis manuell.
 - **Rater sieht Reveal NICHT mehr**: Rater und TV-Spieler bleiben auf dem Warte-Screen während die Durchstreich-Animation läuft.
 
 ### Neu: Kategorien & Wortlisten
-
 - 4 Wortlisten als separate Dateien: `words-leicht.js`, `words-mittel.js`, `words-schwer.js`, `words-fsk18.js`
 - Kategorie-Auswahl per Chips auf Start-Screen und in der Lobby (Host kann ändern)
 - Kategorie wird in Firebase gespeichert und für alle Clients sichtbar
 
 ### Neu: UI
-
 - **QR-Code** in Lobby wenn TV-Spieler gesetzt – schnelles Beitreten mit Smartphone
 - **Schieberegler** für Spieler-Limit (statt Dropdown)
 - **Responsivität**: Logo bricht nicht mehr aus dem Container; Geheimwort skaliert automatisch mit der Textlänge; Layout nutzt auf großen Screens (Desktop, TV) viel mehr Platz (Lobby zweispaltig)
@@ -150,7 +146,6 @@ Format: [Semantische Versionierung](https://semver.org/lang/de/) `vMAJOR.MINOR.P
 - Kick-Rechte für Moderatoren ergänzt
 
 ### Dateien
-
 ```
 assets/words/words-leicht.js   ← neu
 assets/words/words-mittel.js   ← neu
@@ -163,7 +158,6 @@ assets/words/words-fsk18.js    ← neu
 ## [v1.3.0] – 2025-XX-XX
 
 ### Neu
-
 - **Host-Reconnect**: UID wird in `localStorage` gespeichert (statt `sessionStorage`).
   Beim Seitenaufruf wird geprüft ob noch eine aktive Host-Lobby existiert – falls ja,
   kehrt der Host automatisch zur Lobby zurück ohne neu beitreten zu müssen.
@@ -183,7 +177,6 @@ assets/words/words-fsk18.js    ← neu
 - **Ich-Badge**: Spieler sehen ihr eigenes Profil in der Liste mit „Du"-Markierung.
 
 ### Geändert
-
 - `getOrCreateUID()` nutzt jetzt `localStorage` statt `sessionStorage`
 - `enterLobbyScreen()` ruft `removeAllListeners()` auf (verhindert doppelte Listener bei Rundenende)
 - `watchForResult()` als eigenständiger Listener statt separater Funktion konsolidiert
@@ -193,7 +186,6 @@ assets/words/words-fsk18.js    ← neu
 ## [v1.2.0] – 2025-XX-XX
 
 ### Geändert
-
 - Firebase-Konfiguration direkt in `assets/js/game.js` eingebaut (kein Setup-Modal mehr nötig)
 - `databaseURL` der Realtime Database (`europe-west1`) ergänzt
 - Config-Modal komplett entfernt aus `index.html` und `game.js`
@@ -206,7 +198,6 @@ assets/words/words-fsk18.js    ← neu
 ## [v1.1.0] – 2025-XX-XX
 
 ### Geändert
-
 - Projekt umbenannt von „Just One" zu **„One Chance"**
 - Dateistruktur reorganisiert: CSS und JS liegen jetzt in `assets/css/` bzw. `assets/js/`
 - Nur `index.html` liegt im Root-Verzeichnis (GitHub Pages kompatibel)
@@ -217,7 +208,6 @@ assets/words/words-fsk18.js    ← neu
 - `.gitignore` hinzugefügt
 
 ### Dateistruktur
-
 ```
 one-chance/
 ├── index.html
@@ -234,7 +224,6 @@ one-chance/
 ## [v1.0.0] – 2025-XX-XX
 
 ### Neu
-
 - Lobby-System mit zufälligem 6-stelligen Code
 - Beliebig viele Spieler (Minimum: 3)
 - Zufällige Rater-Zuteilung pro Runde

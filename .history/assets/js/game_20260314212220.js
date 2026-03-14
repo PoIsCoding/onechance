@@ -35,62 +35,6 @@ function log(msg, data = null) {
 log("game.js v1.4.0 geladen");
 
 // ══════════════════════════════════════════════════════════════
-//  AUDIO
-//  Sounds liegen unter assets/audio/
-//  playSound(key) spielt den Sound nur auf dem richtigen Gerät ab:
-//    - 'countdown' → nur TV-Spieler
-//    - 'reveal'    → nur TV-Spieler
-//    - 'alleine'   → nur Ratender (TV oder normaler Guesser)
-//    - 'win'       → nur Ratender
-//    - 'fail'      → nur Ratender
-// ══════════════════════════════════════════════════════════════
-const AUDIO_FILES = {
-  countdown: 'assets/audio/Achtung_es_geht_los.mp3',
-  reveal:    'assets/audio/du_darfst_jetzt_hinweise_sehen.mp3',
-  alleine:   'assets/audio/alleine.mp3',
-  win:       'assets/audio/win.mp3',
-  fail:      'assets/audio/fail.mp3',
-};
-
-// Laufende Audio-Instanzen damit wir sie stoppen können
-const audioInstances = {};
-
-function playSound(key) {
-  // Prüfen ob dieser Client den Sound abspielen soll
-  const isGuesserClient = State.isGuesser || State.isTV;
-  const isTVClient      = State.isTV;
-
-  if (key === 'countdown' || key === 'reveal') {
-    // Nur auf dem TV-Gerät
-    if (!isTVClient) return;
-  } else if (key === 'alleine' || key === 'win' || key === 'fail') {
-    // Nur auf dem Gerät des Ratenden (TV oder normaler Guesser)
-    if (!isGuesserClient) return;
-  }
-
-  const src = AUDIO_FILES[key];
-  if (!src) return;
-
-  // Evtl. laufenden Sound stoppen
-  if (audioInstances[key]) {
-    audioInstances[key].pause();
-    audioInstances[key].currentTime = 0;
-  }
-
-  const audio = new Audio(src);
-  audioInstances[key] = audio;
-  audio.play().catch(e => log('Audio-Fehler:', e.message));
-  log('Sound:', key);
-}
-
-function stopSound(key) {
-  if (audioInstances[key]) {
-    audioInstances[key].pause();
-    audioInstances[key].currentTime = 0;
-  }
-}
-
-// ══════════════════════════════════════════════════════════════
 //  WORTLISTEN nach Kategorie
 //  Die Arrays kommen aus den separaten words-*.js Dateien
 // ══════════════════════════════════════════════════════════════
@@ -158,10 +102,10 @@ const screens = {
   modReview: document.getElementById("screen-mod-review"),
   reveal: document.getElementById("screen-reveal"),
   guess: document.getElementById("screen-guess"),
-  tvWait:      document.getElementById("screen-tv-wait"),
+  tvWait: document.getElementById("screen-tv-wait"),
   tvCountdown: document.getElementById("screen-tv-countdown"), // TV: Countdown vor Wort
-  tvClue:      document.getElementById("screen-tv-clue"),   // TV: Geheimwort + Counter
-  tvGuess: document.getElementById("screen-tv-guess"),  // TV: Hinweise anzeigen
+  tvClue: document.getElementById("screen-tv-clue"), // TV: Geheimwort + Counter
+  tvGuess: document.getElementById("screen-tv-guess"), // TV: Hinweise anzeigen
   observer: document.getElementById("screen-observer"),
   result: document.getElementById("screen-result"),
 };
@@ -897,9 +841,13 @@ async function startGame() {
     log("TV-Spieler ist Rater:", State.players[State.tvUID]?.name);
     const word = getRandomWord(State.category);
     await State.db.ref(`lobbies/${State.lobbyCode}`).update({
-      phase: "clue", secretWord: word,
+      phase: "clue",
+      secretWord: word,
       guesserUID: State.tvUID,
-      clues: {}, modStrikes: {}, guess: null, verdict: null,
+      clues: {},
+      modStrikes: {},
+      guess: null,
+      verdict: null,
     });
     startCentralListener();
     return;
@@ -918,10 +866,10 @@ async function startGame() {
   let queue = queueSnap.val() || [];
 
   // Queue bereinigen: Spieler die nicht mehr aktiv sind entfernen
-  queue = queue.filter(uid => activePlayers.includes(uid));
+  queue = queue.filter((uid) => activePlayers.includes(uid));
 
   // Neue Spieler die noch nicht in der Queue sind hinten anhängen
-  activePlayers.forEach(uid => {
+  activePlayers.forEach((uid) => {
     if (!queue.includes(uid)) queue.push(uid);
   });
 
@@ -939,14 +887,14 @@ async function startGame() {
   log("Gesuchtes Wort:", word);
 
   await State.db.ref(`lobbies/${State.lobbyCode}`).update({
-    phase:        "clue",
-    secretWord:   word,
-    guesserUID:   guesserUID,
-    guesserQueue: queue,   // aktualisierte Queue zurückschreiben
-    clues:        {},
-    modStrikes:   {},
-    guess:        null,
-    verdict:      null,
+    phase: "clue",
+    secretWord: word,
+    guesserUID: guesserUID,
+    guesserQueue: queue, // aktualisierte Queue zurückschreiben
+    clues: {},
+    modStrikes: {},
+    guess: null,
+    verdict: null,
   });
 
   startCentralListener();
@@ -1018,13 +966,15 @@ function enterCluePhase() {
   if (State.isGuesser || State.isTV) {
     if (State.isTV) {
       // Zuerst Countdown anzeigen, dann Geheimwort
-      const guesserName = State.players[State.guesserUID]?.name || "Der Ratende";
-      document.getElementById("tv-countdown-guesser-name").textContent = guesserName;
+      const guesserName =
+        State.players[State.guesserUID]?.name || "Der Ratende";
+      document.getElementById("tv-countdown-guesser-name").textContent =
+        guesserName;
       showScreen("tvCountdown");
-      playSound('countdown'); // "Achtung, es geht los!"
       startTVCountdown(5, () => {
         // Nach Countdown: Geheimwort anzeigen + Tipp-Counter starten
-        document.getElementById("tv-secret-word").textContent = State.secretWord;
+        document.getElementById("tv-secret-word").textContent =
+          State.secretWord;
         document.getElementById("tv-clue-counter").textContent = "0 / ?";
         showScreen("tvClue");
         watchClueCounterForTV();
@@ -1080,9 +1030,7 @@ function watchForAllCluesSubmitted() {
       const modUID = State.modUID;
       const givers = Object.entries(players).filter(
         ([uid, p]) =>
-          p.role !== "zuschauer" &&
-          uid !== guesserUID &&
-          uid !== modUID,
+          p.role !== "zuschauer" && uid !== guesserUID && uid !== modUID,
       );
 
       log(`Clues: ${clueCount}/${givers.length} – isHost: ${State.isHost}`);
@@ -1199,7 +1147,8 @@ function enterModReviewPhase() {
   if (State.isGuesser || State.isTV) {
     if (State.isTV) {
       document.getElementById("tv-wait-title").textContent = "Kurze Pause…";
-      document.getElementById("tv-wait-sub").textContent = "Der Moderator prüft die Hinweise.";
+      document.getElementById("tv-wait-sub").textContent =
+        "Der Moderator prüft die Hinweise.";
       showScreen("tvWait");
     } else {
       showScreen("guesserWait");
@@ -1306,26 +1255,30 @@ async function enterRevealPhase() {
   State.modStrikes = data.modStrikes || {};
 
   const allEntries = Object.entries(State.clues);
-  const texts       = allEntries.map(([, t]) => t);
+  const texts = allEntries.map(([, t]) => t);
 
-  const duplicates    = findDuplicates(texts);
-  const crossMatches  = findCrossMatches(texts);
+  const duplicates = findDuplicates(texts);
+  const crossMatches = findCrossMatches(texts);
 
   // Hinweise die das Geheimwort enthalten (oder darin enthalten sind) → auch streichen
   const secretHits = new Set(
     allEntries
       .filter(([, t]) => isContainedInSecretWord(t, State.secretWord))
-      .map(([, t]) => normalizeClue(t))
+      .map(([, t]) => normalizeClue(t)),
   );
 
   // Alle automatisch zu streichenden Texte zusammenfassen
   const autoStrike = new Set([...duplicates, ...crossMatches, ...secretHits]);
 
   log(
-    "Duplikate:", [...duplicates],
-    "| Kreuz-Treffer:", [...crossMatches],
-    "| Geheimwort-Treffer:", [...secretHits],
-    "| Mod-Strikes:", Object.keys(State.modStrikes),
+    "Duplikate:",
+    [...duplicates],
+    "| Kreuz-Treffer:",
+    [...crossMatches],
+    "| Geheimwort-Treffer:",
+    [...secretHits],
+    "| Mod-Strikes:",
+    Object.keys(State.modStrikes),
   );
 
   const list = document.getElementById("clue-list");
@@ -1355,11 +1308,7 @@ async function enterRevealPhase() {
 
   // Countdown-Ring nach der Animation starten
   const animDuration = 800 + autoStrike.size * 500 + 400;
-  setTimeout(() => {
-    // Sound "du darfst jetzt Hinweise sehen" für TV-Spieler
-    playSound('reveal');
-    startRevealCountdown(5);
-  }, animDuration);
+  setTimeout(() => startRevealCountdown(5), animDuration);
 }
 
 // Normalisiert einen Text für den Vergleich:
@@ -1385,7 +1334,7 @@ function findDuplicates(texts) {
 // Gibt ein Set normalisierter Texte zurück die gestrichen werden sollen.
 function findCrossMatches(texts) {
   const normalized = texts.map(normalizeClue);
-  const toStrike   = new Set();
+  const toStrike = new Set();
 
   for (let i = 0; i < normalized.length; i++) {
     for (let j = 0; j < normalized.length; j++) {
@@ -1405,7 +1354,7 @@ function findCrossMatches(texts) {
 // Außerdem: Gesucht "Kuchen" → "Käsekuchen" als Hinweis würde ebenfalls gestrichen.
 function isContainedInSecretWord(clueText, secretWord) {
   if (!secretWord) return false;
-  const clue   = normalizeClue(clueText);
+  const clue = normalizeClue(clueText);
   const secret = normalizeClue(secretWord);
   // Hinweis ist Teilstring des Geheimworts ODER Geheimwort ist Teilstring des Hinweises
   return secret.includes(clue) || clue.includes(secret);
@@ -1452,21 +1401,22 @@ async function proceedToGuess() {
 
   const snap = await State.db.ref(`lobbies/${State.lobbyCode}`).once("value");
   const data = snap.val();
-  const clues  = data.clues || {};
+  const clues = data.clues || {};
   const strikes = data.modStrikes || {};
-  const texts   = Object.values(clues);
-  const dupes   = findDuplicates(texts);
+  const texts = Object.values(clues);
+  const dupes = findDuplicates(texts);
   const crosses = findCrossMatches(texts);
 
   // Valide Hinweise: nicht doppelt, kein Kreuz-Treffer, kein Geheimwort-Treffer, nicht vom Mod gestrichen
   const validClues = {};
   Object.entries(clues).forEach(([uid, text]) => {
-    const n            = normalizeClue(text);
-    const isDupe       = dupes.has(n);
-    const isCross      = crosses.has(n);
-    const isSecretHit  = isContainedInSecretWord(text, data.secretWord);
-    const isStruck     = !!strikes[uid];
-    if (!isDupe && !isCross && !isSecretHit && !isStruck) validClues[uid] = text;
+    const n = normalizeClue(text);
+    const isDupe = dupes.has(n);
+    const isCross = crosses.has(n);
+    const isSecretHit = isContainedInSecretWord(text, data.secretWord);
+    const isStruck = !!strikes[uid];
+    if (!isDupe && !isCross && !isSecretHit && !isStruck)
+      validClues[uid] = text;
   });
 
   log("Valide Hinweise:", validClues);
@@ -1571,17 +1521,19 @@ async function enterGuessPhase() {
       if (validClues.length === 0) {
         const li = document.createElement("li");
         li.textContent = "😬 Alle Hinweise wurden gestrichen – viel Glück!";
-        li.style.cssText = "color:var(--accent2);font-style:italic;list-style:none;text-align:center";
+        li.style.cssText =
+          "color:var(--accent2);font-style:italic;list-style:none;text-align:center";
         tvList.appendChild(li);
-        document.getElementById("tv-guess-hint").textContent = "Keine Hinweise übrig – viel Glück!";
-        playSound('alleine'); // keine Hinweise
+        document.getElementById("tv-guess-hint").textContent =
+          "Keine Hinweise übrig – viel Glück!";
       } else {
         validClues.forEach((text) => {
           const li = document.createElement("li");
           li.textContent = text;
           tvList.appendChild(li);
         });
-        document.getElementById("tv-guess-hint").textContent = "Der Ratende darf sich jetzt umdrehen! 👀";
+        document.getElementById("tv-guess-hint").textContent =
+          "Der Ratende darf sich jetzt umdrehen! 👀";
       }
       showScreen("tvGuess");
       return;
@@ -1594,17 +1546,19 @@ async function enterGuessPhase() {
     if (validClues.length === 0) {
       const li = document.createElement("li");
       li.textContent = "😬 Alle Hinweise wurden gestrichen – viel Glück!";
-      li.style.cssText = "color:var(--accent2);font-style:italic;list-style:none;text-align:center";
+      li.style.cssText =
+        "color:var(--accent2);font-style:italic;list-style:none;text-align:center";
       list.appendChild(li);
-      document.querySelector("#screen-guess .round-label").textContent = "Keine Hinweise übrig:";
-      playSound('alleine'); // keine Hinweise
+      document.querySelector("#screen-guess .round-label").textContent =
+        "Keine Hinweise übrig:";
     } else {
       validClues.forEach((text) => {
         const li = document.createElement("li");
         li.textContent = text;
         list.appendChild(li);
       });
-      document.querySelector("#screen-guess .round-label").textContent = "Deine Hinweise:";
+      document.querySelector("#screen-guess .round-label").textContent =
+        "Deine Hinweise:";
     }
 
     document.getElementById("input-guess").value = "";
@@ -1654,7 +1608,7 @@ async function submitGuess() {
   // Bei TV-Modus: kein automatisches Richtig/Falsch – Mod/Host entscheidet
   if (State.isTV) {
     touchActivity();
-  await State.db.ref(`lobbies/${State.lobbyCode}`).update({
+    await State.db.ref(`lobbies/${State.lobbyCode}`).update({
       phase: "result",
       guess: text,
       verdict: null, // Wartet auf Moderator-Verdikt
@@ -1746,17 +1700,14 @@ async function setVerdict(correct) {
   log("Verdikt gesetzt:", correct);
   // Phase auf result setzen damit alle Clients den Result-Screen sehen
   await State.db.ref(`lobbies/${State.lobbyCode}`).update({
-    phase:   "result",
+    phase: "result",
     verdict: correct,
-    guess:   correct ? State.secretWord : "—", // kein Eingabefeld im TV-Modus
+    guess: correct ? State.secretWord : "—", // kein Eingabefeld im TV-Modus
   });
 }
 
 function renderResultScreen(guess, correct) {
   log("Ergebnis rendern:", correct ? "RICHTIG" : "FALSCH");
-
-  // Sound nur beim Ratenden abspielen
-  playSound(correct ? 'win' : 'fail');
 
   document.getElementById("result-icon").textContent = correct ? "🎉" : "😬";
   document.getElementById("result-title").textContent = correct
@@ -1814,7 +1765,10 @@ function startInactivityTimer() {
 
   log("Inaktivitäts-Timer gestartet (30 min)");
   State._inactivityTimer = setInterval(async () => {
-    if (!State.lobbyCode || !State.db) { stopInactivityTimer(); return; }
+    if (!State.lobbyCode || !State.db) {
+      stopInactivityTimer();
+      return;
+    }
 
     const snap = await State.db
       .ref(`lobbies/${State.lobbyCode}/lastActivity`)
@@ -1834,7 +1788,7 @@ function startInactivityTimer() {
       localStorage.removeItem("onechance_lobby");
       localStorage.removeItem("onechance_player_lobby");
       State.lobbyCode = null;
-      State.isHost    = false;
+      State.isHost = false;
       showScreen("start");
       showToast("⏱ Lobby wurde wegen Inaktivität geschlossen.");
     }
@@ -1897,13 +1851,13 @@ function startCentralListener() {
       log("Rater nicht mehr in der Lobby – alle zurück zur Lobby");
       (async () => {
         await State.db.ref(`lobbies/${State.lobbyCode}`).update({
-          phase:      "lobby",
+          phase: "lobby",
           secretWord: null,
           guesserUID: null,
-          clues:      {},
+          clues: {},
           modStrikes: {},
-          guess:      null,
-          verdict:    null,
+          guess: null,
+          verdict: null,
         });
         showToast("🚶 Der Rater hat die Lobby verlassen – zurück zur Lobby.");
       })();
@@ -1994,14 +1948,14 @@ async function backToLobby() {
   removeAllListeners();
   showHostAbortButton(false);
   await State.db.ref(`lobbies/${State.lobbyCode}`).update({
-    phase:        "lobby",
-    secretWord:   null,
-    guesserUID:   null,
-    guesserQueue: [],    // Queue zurücksetzen
-    clues:        {},
-    modStrikes:   {},
-    guess:        null,
-    verdict:      null,
+    phase: "lobby",
+    secretWord: null,
+    guesserUID: null,
+    guesserQueue: [], // Queue zurücksetzen
+    clues: {},
+    modStrikes: {},
+    guess: null,
+    verdict: null,
   });
   setTimeout(() => enterLobbyScreen(), 300);
 }
@@ -2058,8 +2012,8 @@ async function leaveGame() {
   log("Spieler verlässt:", State.uid, "| Phase:", State.phase);
 
   const lobbyCode = State.lobbyCode;
-  const uid       = State.uid;
-  const phase     = State.phase;
+  const uid = State.uid;
+  const phase = State.phase;
   const wasGuesser = State.isGuesser;
 
   // Eigene Listeners stoppen
@@ -2080,21 +2034,21 @@ async function leaveGame() {
   if (wasGuesser) {
     log("Rater verlässt – alle zurück zur Lobby");
     await State.db.ref(`lobbies/${lobbyCode}`).update({
-      phase:      "lobby",
+      phase: "lobby",
       secretWord: null,
       guesserUID: null,
-      clues:      {},
+      clues: {},
       modStrikes: {},
-      guess:      null,
-      verdict:    null,
+      guess: null,
+      verdict: null,
     });
   }
 
   // Eigenen State bereinigen
   localStorage.removeItem("onechance_player_lobby");
-  State.lobbyCode  = null;
-  State.isHost     = false;
-  State.isGuesser  = false;
+  State.lobbyCode = null;
+  State.isHost = false;
+  State.isGuesser = false;
   showScreen("start");
 }
 
@@ -2102,9 +2056,9 @@ async function leaveGame() {
 function injectLeaveButton() {
   if (document.getElementById("leave-game-btn")) return;
   const btn = document.createElement("button");
-  btn.id          = "leave-game-btn";
+  btn.id = "leave-game-btn";
   btn.textContent = "↩ Verlassen";
-  btn.title       = "Spiel verlassen";
+  btn.title = "Spiel verlassen";
   btn.addEventListener("click", leaveGame);
   document.body.appendChild(btn);
   log("Leave-Button eingefügt");
@@ -2307,7 +2261,9 @@ document
 
 // Nächste Runde / Beenden
 document.getElementById("btn-next-round").addEventListener("click", nextRound);
-document.getElementById("btn-back-lobby").addEventListener("click", backToLobby);
+document
+  .getElementById("btn-back-lobby")
+  .addEventListener("click", backToLobby);
 document.getElementById("btn-end-game").addEventListener("click", endGame);
 
 // ══════════════════════════════════════════════════════════════
