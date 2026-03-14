@@ -5,6 +5,17 @@ Format: [Semantische Versionierung](https://semver.org/lang/de/) `vMAJOR.MINOR.P
 
 ---
 
+## [v1.4.7] – 2026-03-14
+
+### Neu
+- **Mobile 9:16 Optimierung**: Karte füllt auf kleinen Displays (≤ 480px) den gesamten Viewport – kein ungenutzter Rand mehr
+- **iOS Safe Area**: Unterstützung für Notch & Dynamic Island (padding-top/bottom via `env(safe-area-inset-*)`)
+- **`viewport-fit=cover`**: Verhindert weiße Balken auf iPhone mit abgerundeten Ecken
+- Kompaktere Abstände, Schriftgrößen und Buttons auf kleinen Screens
+- Sonderbehandlung für sehr kleine Screens (≤ 350px, z.B. iPhone SE 1. Gen)
+
+---
+
 ## [v1.4.6] – 2026-03-14
 
 ### Neu
