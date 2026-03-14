@@ -820,47 +820,63 @@ function updateStartButton() {
 async function startGame() {
   log("Spiel starten – Kategorie:", State.category);
 
-  // Mögliche Rater: alle aktiven Spieler OHNE Zuschauer
-  const activePlayers = Object.entries(State.players).filter(
-    ([uid, p]) => p.role !== "zuschauer",
-  );
-
-  let guesserUID;
-
+  // TV-Spieler ist immer Rater – keine Rotation nötig
   if (State.tvUID && State.players[State.tvUID]) {
-    // TV-Spieler ist immer Rater
-    guesserUID = State.tvUID;
-    log("TV-Spieler ist Rater:", State.players[guesserUID]?.name);
-  } else {
-    // Zufälligen Rater wählen
-    const idx = Math.floor(Math.random() * activePlayers.length);
-    guesserUID = activePlayers[idx][0];
-
-    // Wenn Host raten würde und es keinen Moderator gibt → zufälligen anderen als Wort-Wächter setzen
-    if (guesserUID === State.uid && !State.modUID) {
-      log(
-        "Host wäre Rater ohne Mod – Wort wird trotzdem zufällig gewählt, Mod-Funktion temporär übertragen",
-      );
-      // Keinen automatischen Mod setzen – der Host sieht das Wort nicht (er ist Rater)
-    }
-    log("Zufälliger Rater:", State.players[guesserUID]?.name);
+    log("TV-Spieler ist Rater:", State.players[State.tvUID]?.name);
+    const word = getRandomWord(State.category);
+    await State.db.ref(`lobbies/${State.lobbyCode}`).update({
+      phase: "clue", secretWord: word,
+      guesserUID: State.tvUID,
+      clues: {}, modStrikes: {}, guess: null, verdict: null,
+    });
+    startCentralListener();
+    return;
   }
+
+  // ── Rotations-Queue ──
+  // Mögliche Rater: aktive Spieler OHNE Zuschauer und OHNE Mod
+  const activePlayers = Object.entries(State.players)
+    .filter(([uid, p]) => p.role !== "zuschauer" && uid !== State.modUID)
+    .map(([uid]) => uid);
+
+  // Queue aus Firebase lesen
+  const queueSnap = await State.db
+    .ref(`lobbies/${State.lobbyCode}/guesserQueue`)
+    .once("value");
+  let queue = queueSnap.val() || [];
+
+  // Queue bereinigen: Spieler die nicht mehr aktiv sind entfernen
+  queue = queue.filter(uid => activePlayers.includes(uid));
+
+  // Neue Spieler die noch nicht in der Queue sind hinten anhängen
+  activePlayers.forEach(uid => {
+    if (!queue.includes(uid)) queue.push(uid);
+  });
+
+  // Queue leer oder alle durch → neu mischen (Fisher-Yates)
+  if (queue.length === 0) {
+    log("Queue leer – kein aktiver Spieler gefunden");
+    return;
+  }
+
+  // Nächsten Rater vom Anfang der Queue nehmen
+  const guesserUID = queue.shift();
+  log(`Rater: ${State.players[guesserUID]?.name} | Queue danach:`, queue);
 
   const word = getRandomWord(State.category);
   log("Gesuchtes Wort:", word);
 
   await State.db.ref(`lobbies/${State.lobbyCode}`).update({
-    phase: "clue",
-    secretWord: word,
-    guesserUID: guesserUID,
-    clues: {},
-    modStrikes: {},
-    guess: null,
-    verdict: null,
+    phase:        "clue",
+    secretWord:   word,
+    guesserUID:   guesserUID,
+    guesserQueue: queue,   // aktualisierte Queue zurückschreiben
+    clues:        {},
+    modStrikes:   {},
+    guess:        null,
+    verdict:      null,
   });
 
-  // Globaler Phasen-Listener für alle Clients starten
-  // (wird bei enterLobbyScreen via removeAllListeners gestoppt und neu gestartet)
   startCentralListener();
 }
 
@@ -1123,7 +1139,10 @@ async function enterRevealPhase() {
   State.modStrikes = data.modStrikes || {};
 
   const allEntries = Object.entries(State.clues);
-  const duplicates  = findDuplicates(allEntries.map(([, t]) => t));
+  const texts       = allEntries.map(([, t]) => t);
+
+  const duplicates    = findDuplicates(texts);
+  const crossMatches  = findCrossMatches(texts);
 
   // Hinweise die das Geheimwort enthalten (oder darin enthalten sind) → auch streichen
   const secretHits = new Set(
@@ -1133,10 +1152,11 @@ async function enterRevealPhase() {
   );
 
   // Alle automatisch zu streichenden Texte zusammenfassen
-  const autoStrike = new Set([...duplicates, ...secretHits]);
+  const autoStrike = new Set([...duplicates, ...crossMatches, ...secretHits]);
 
   log(
     "Duplikate:", [...duplicates],
+    "| Kreuz-Treffer:", [...crossMatches],
     "| Geheimwort-Treffer:", [...secretHits],
     "| Mod-Strikes:", Object.keys(State.modStrikes),
   );
@@ -1187,6 +1207,26 @@ function findDuplicates(texts) {
     seen.has(n) ? dupes.add(n) : seen.add(n);
   });
   return dupes;
+}
+
+// Findet alle Hinweise die in einem anderen Hinweis enthalten sind (oder umgekehrt).
+// Beispiel: "Luft" und "Luftblase" → beide werden gestrichen weil "Luft" in "Luftblase" steckt.
+// Gibt ein Set normalisierter Texte zurück die gestrichen werden sollen.
+function findCrossMatches(texts) {
+  const normalized = texts.map(normalizeClue);
+  const toStrike   = new Set();
+
+  for (let i = 0; i < normalized.length; i++) {
+    for (let j = 0; j < normalized.length; j++) {
+      if (i === j) continue;
+      // Prüfen ob i in j enthalten ist (oder gleich)
+      if (normalized[j].includes(normalized[i]) && normalized[i].length > 0) {
+        toStrike.add(normalized[i]); // der kürzere/enthaltene
+        toStrike.add(normalized[j]); // der längere/enthaltende
+      }
+    }
+  }
+  return toStrike;
 }
 
 // Prüft ob ein Hinweis-Wort im Geheimwort enthalten ist (oder umgekehrt).
@@ -1241,17 +1281,21 @@ async function proceedToGuess() {
 
   const snap = await State.db.ref(`lobbies/${State.lobbyCode}`).once("value");
   const data = snap.val();
-  const clues = data.clues || {};
+  const clues  = data.clues || {};
   const strikes = data.modStrikes || {};
-  const dupes = findDuplicates(Object.values(clues));
+  const texts   = Object.values(clues);
+  const dupes   = findDuplicates(texts);
+  const crosses = findCrossMatches(texts);
 
-  // Valide Hinweise: nicht doppelt, kein Geheimwort-Treffer, nicht vom Mod gestrichen
+  // Valide Hinweise: nicht doppelt, kein Kreuz-Treffer, kein Geheimwort-Treffer, nicht vom Mod gestrichen
   const validClues = {};
   Object.entries(clues).forEach(([uid, text]) => {
-    const isDupe       = dupes.has(normalizeClue(text));
+    const n            = normalizeClue(text);
+    const isDupe       = dupes.has(n);
+    const isCross      = crosses.has(n);
     const isSecretHit  = isContainedInSecretWord(text, data.secretWord);
     const isStruck     = !!strikes[uid];
-    if (!isDupe && !isSecretHit && !isStruck) validClues[uid] = text;
+    if (!isDupe && !isCross && !isSecretHit && !isStruck) validClues[uid] = text;
   });
 
   log("Valide Hinweise:", validClues);
@@ -1670,18 +1714,19 @@ async function nextRound() {
 }
 
 async function backToLobby() {
-  // Zurück zur Lobby – alle Spieler landen auf dem Lobby-Screen
-  log("Zurück zur Lobby");
+  // Zurück zur Lobby – Queue wird zurückgesetzt, alle landen auf dem Lobby-Screen
+  log("Zurück zur Lobby – Queue zurückgesetzt");
   removeAllListeners();
   showHostAbortButton(false);
   await State.db.ref(`lobbies/${State.lobbyCode}`).update({
-    phase: "lobby",
-    secretWord: null,
-    guesserUID: null,
-    clues: {},
-    modStrikes: {},
-    guess: null,
-    verdict: null,
+    phase:        "lobby",
+    secretWord:   null,
+    guesserUID:   null,
+    guesserQueue: [],    // Queue zurücksetzen
+    clues:        {},
+    modStrikes:   {},
+    guess:        null,
+    verdict:      null,
   });
   setTimeout(() => enterLobbyScreen(), 300);
 }

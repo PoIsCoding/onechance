@@ -5,6 +5,20 @@ Format: [Semantische Versionierung](https://semver.org/lang/de/) `vMAJOR.MINOR.P
 
 ---
 
+## [v1.4.9] – 2026-03-14
+
+### Neu
+- **Kreuz-Treffer zwischen Hinweisen**: Ist ein Hinweis in einem anderen enthalten, werden beide gestrichen. Beispiel: „Luft" und „Luftblase" → beide weg, weil „Luft" in „Luftblase" vorkommt.
+
+---
+
+## [v1.4.8] – 2026-03-14
+
+### Neu
+- **Rater-Rotation**: Jeder Spieler ist einmal Rater bevor sich jemand wiederholt. Die Queue wird in Firebase gespeichert und bei jeder Runde aktualisiert. Neu beitretende Spieler werden automatisch in die Queue aufgenommen. Zurück zur Lobby setzt die Queue zurück.
+
+---
+
 ## [v1.4.7] – 2026-03-14
 
 ### Neu
