@@ -1,734 +1,614 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="de">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>One Chance – Statistiken</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Syne:wght@400;700;800&family=DM+Sans:wght@300;400;500&display=swap"
-      rel="stylesheet"
-    />
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>One Chance – Statistiken</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;700;800&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet" />
 
-    <!-- Firebase -->
-    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
+  <!-- Firebase -->
+  <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
 
-    <style>
-      :root {
-        --bg: #0d0f1a;
-        --surface: #151826;
-        --surface2: #1c2035;
-        --border: rgba(255, 255, 255, 0.07);
-        --text: #f0f0f8;
-        --muted: #8888aa;
-        --accent: #f5e642;
-        --accent2: #ff6b6b;
-        --accent3: #64ffda;
-        --accent4: #b794f4;
-        --accent5: #fbb03b;
-        --font-display: "Syne", sans-serif;
-        --font-body: "DM Sans", sans-serif;
-      }
+  <style>
+    :root {
+      --bg:       #0d0f1a;
+      --surface:  #151826;
+      --surface2: #1c2035;
+      --border:   rgba(255,255,255,0.07);
+      --text:     #f0f0f8;
+      --muted:    #8888aa;
+      --accent:   #f5e642;
+      --accent2:  #ff6b6b;
+      --accent3:  #64ffda;
+      --accent4:  #b794f4;
+      --accent5:  #fbb03b;
+      --font-display: 'Syne', sans-serif;
+      --font-body:    'DM Sans', sans-serif;
+    }
 
-      *,
-      *::before,
-      *::after {
-        box-sizing: border-box;
-        margin: 0;
-        padding: 0;
-      }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
-      body {
-        background: var(--bg);
-        color: var(--text);
-        font-family: var(--font-body);
-        min-height: 100vh;
-        padding: 40px 24px 80px;
-      }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font-body);
+      min-height: 100vh;
+      padding: 40px 24px 80px;
+    }
 
-      /* ── Header ── */
-      .header {
-        max-width: 1100px;
-        margin: 0 auto 48px;
-        display: flex;
-        align-items: baseline;
-        gap: 16px;
-        flex-wrap: wrap;
-      }
+    /* ── Header ── */
+    .header {
+      max-width: 1100px;
+      margin: 0 auto 48px;
+      display: flex;
+      align-items: baseline;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
 
-      .logo {
-        font-family: var(--font-display);
-        font-size: 32px;
-        font-weight: 800;
-        color: var(--text);
-      }
+    .logo {
+      font-family: var(--font-display);
+      font-size: 32px;
+      font-weight: 800;
+      color: var(--text);
+    }
 
-      .logo em {
-        color: var(--accent);
-        font-style: normal;
-      }
+    .logo em {
+      color: var(--accent);
+      font-style: normal;
+    }
 
-      .header-sub {
-        font-size: 14px;
-        color: var(--muted);
-        letter-spacing: 0.1em;
-        text-transform: uppercase;
-      }
+    .header-sub {
+      font-size: 14px;
+      color: var(--muted);
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+    }
 
-      .live-dot {
-        display: inline-block;
-        width: 8px;
-        height: 8px;
-        border-radius: 50%;
-        background: var(--accent3);
-        margin-right: 6px;
-        animation: pulse 1.8s ease-in-out infinite;
-      }
+    .live-dot {
+      display: inline-block;
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: var(--accent3);
+      margin-right: 6px;
+      animation: pulse 1.8s ease-in-out infinite;
+    }
 
-      @keyframes pulse {
-        0%,
-        100% {
-          opacity: 1;
-          transform: scale(1);
-        }
-        50% {
-          opacity: 0.4;
-          transform: scale(0.7);
-        }
-      }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50%       { opacity: 0.4; transform: scale(0.7); }
+    }
 
-      /* ── Grid ── */
-      .grid {
-        max-width: 1100px;
-        margin: 0 auto;
-        display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-        gap: 16px;
-        margin-bottom: 32px;
-      }
+    /* ── Grid ── */
+    .grid {
+      max-width: 1100px;
+      margin: 0 auto;
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+      gap: 16px;
+      margin-bottom: 32px;
+    }
 
-      /* ── Stat-Karte ── */
-      .stat-card {
-        background: var(--surface);
-        border: 1px solid var(--border);
-        border-radius: 16px;
-        padding: 24px 20px;
-        position: relative;
-        overflow: hidden;
-        transition: border-color 0.2s;
-      }
+    /* ── Stat-Karte ── */
+    .stat-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 24px 20px;
+      position: relative;
+      overflow: hidden;
+      transition: border-color 0.2s;
+    }
 
-      .stat-card:hover {
-        border-color: rgba(255, 255, 255, 0.14);
-      }
+    .stat-card:hover { border-color: rgba(255,255,255,0.14); }
 
-      .stat-card::before {
-        content: "";
-        position: absolute;
-        inset: 0;
-        background: radial-gradient(
-          circle at 80% 20%,
-          var(--card-glow, rgba(245, 230, 66, 0.05)) 0%,
-          transparent 65%
-        );
-        pointer-events: none;
-      }
+    .stat-card::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: radial-gradient(circle at 80% 20%, var(--card-glow, rgba(245,230,66,0.05)) 0%, transparent 65%);
+      pointer-events: none;
+    }
 
-      .stat-label {
-        font-size: 11px;
-        font-weight: 600;
-        letter-spacing: 0.12em;
-        text-transform: uppercase;
-        color: var(--muted);
-        margin-bottom: 10px;
-      }
+    .stat-label {
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 10px;
+    }
 
-      .stat-value {
-        font-family: var(--font-display);
-        font-size: 42px;
-        font-weight: 800;
-        line-height: 1;
-        color: var(--card-color, var(--accent));
-      }
+    .stat-value {
+      font-family: var(--font-display);
+      font-size: 42px;
+      font-weight: 800;
+      line-height: 1;
+      color: var(--card-color, var(--accent));
+    }
 
-      .stat-sub {
-        font-size: 12px;
-        color: var(--muted);
-        margin-top: 6px;
-      }
+    .stat-sub {
+      font-size: 12px;
+      color: var(--muted);
+      margin-top: 6px;
+    }
 
-      /* ── Breite Karten ── */
-      .wide {
-        grid-column: span 2;
-      }
-      @media (max-width: 520px) {
-        .wide {
-          grid-column: span 1;
-        }
-      }
+    /* ── Breite Karten ── */
+    .wide { grid-column: span 2; }
+    @media (max-width: 520px) { .wide { grid-column: span 1; } }
 
-      /* ── Tabelle ── */
-      .section {
-        max-width: 1100px;
-        margin: 0 auto 32px;
-      }
+    /* ── Tabelle ── */
+    .section {
+      max-width: 1100px;
+      margin: 0 auto 32px;
+    }
 
-      .section-title {
-        font-family: var(--font-display);
-        font-size: 18px;
-        font-weight: 700;
-        color: var(--text);
-        margin-bottom: 14px;
-        padding-bottom: 10px;
-        border-bottom: 1px solid var(--border);
-      }
+    .section-title {
+      font-family: var(--font-display);
+      font-size: 18px;
+      font-weight: 700;
+      color: var(--text);
+      margin-bottom: 14px;
+      padding-bottom: 10px;
+      border-bottom: 1px solid var(--border);
+    }
 
-      table {
-        width: 100%;
-        border-collapse: collapse;
-        font-size: 14px;
-      }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 14px;
+    }
 
-      th {
-        text-align: left;
-        padding: 10px 14px;
-        font-size: 11px;
-        font-weight: 600;
-        letter-spacing: 0.1em;
-        text-transform: uppercase;
-        color: var(--muted);
-        border-bottom: 1px solid var(--border);
-      }
+    th {
+      text-align: left;
+      padding: 10px 14px;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--muted);
+      border-bottom: 1px solid var(--border);
+    }
 
-      td {
-        padding: 11px 14px;
-        border-bottom: 1px solid rgba(255, 255, 255, 0.04);
-        color: var(--text);
-      }
+    td {
+      padding: 11px 14px;
+      border-bottom: 1px solid rgba(255,255,255,0.04);
+      color: var(--text);
+    }
 
-      tr:last-child td {
-        border-bottom: none;
-      }
+    tr:last-child td { border-bottom: none; }
 
-      tr:hover td {
-        background: rgba(255, 255, 255, 0.02);
-      }
+    tr:hover td { background: rgba(255,255,255,0.02); }
 
-      .badge {
-        display: inline-block;
-        padding: 2px 8px;
-        border-radius: 6px;
-        font-size: 11px;
-        font-weight: 700;
-      }
+    .badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 6px;
+      font-size: 11px;
+      font-weight: 700;
+    }
 
-      .badge-win {
-        background: rgba(100, 255, 218, 0.12);
-        color: var(--accent3);
-      }
-      .badge-lose {
-        background: rgba(255, 107, 107, 0.12);
-        color: var(--accent2);
-      }
+    .badge-win  { background: rgba(100,255,218,0.12); color: var(--accent3); }
+    .badge-lose { background: rgba(255,107,107,0.12); color: var(--accent2); }
 
-      /* ── Kategorie-Balken ── */
-      .cat-bar-wrap {
-        display: flex;
-        align-items: center;
-        gap: 10px;
-      }
+    /* ── Kategorie-Balken ── */
+    .cat-bar-wrap {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
 
-      .cat-bar {
-        flex: 1;
-        height: 6px;
-        background: var(--surface2);
-        border-radius: 3px;
-        overflow: hidden;
-      }
+    .cat-bar {
+      flex: 1;
+      height: 6px;
+      background: var(--surface2);
+      border-radius: 3px;
+      overflow: hidden;
+    }
 
-      .cat-bar-fill {
-        height: 100%;
-        border-radius: 3px;
-        transition: width 0.6s ease;
-      }
+    .cat-bar-fill {
+      height: 100%;
+      border-radius: 3px;
+      transition: width 0.6s ease;
+    }
 
-      .cat-count {
-        font-size: 12px;
-        color: var(--muted);
-        min-width: 28px;
-        text-align: right;
-      }
+    .cat-count { font-size: 12px; color: var(--muted); min-width: 28px; text-align: right; }
 
-      /* ── Loading ── */
-      .loading {
-        text-align: center;
-        padding: 80px 20px;
-        color: var(--muted);
-        font-size: 14px;
-      }
+    /* ── Loading ── */
+    .loading {
+      text-align: center;
+      padding: 80px 20px;
+      color: var(--muted);
+      font-size: 14px;
+    }
 
-      /* ── Footer ── */
-      .footer {
-        max-width: 1100px;
-        margin: 48px auto 0;
-        display: flex;
-        gap: 16px;
-        justify-content: center;
-      }
+    /* ── Footer ── */
+    .footer {
+      max-width: 1100px;
+      margin: 48px auto 0;
+      display: flex;
+      gap: 16px;
+      justify-content: center;
+    }
 
-      .footer a {
-        display: inline-flex;
-        align-items: center;
-        gap: 6px;
-        font-size: 12px;
-        color: var(--muted);
-        text-decoration: none;
-        padding: 6px 12px;
-        border: 1px solid rgba(255, 255, 255, 0.08);
-        border-radius: 20px;
-        transition:
-          color 0.2s,
-          border-color 0.2s;
-      }
+    .footer a {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      color: var(--muted);
+      text-decoration: none;
+      padding: 6px 12px;
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 20px;
+      transition: color 0.2s, border-color 0.2s;
+    }
 
-      .footer a:hover {
-        color: var(--text);
-        border-color: rgba(255, 255, 255, 0.2);
-      }
+    .footer a:hover { color: var(--text); border-color: rgba(255,255,255,0.2); }
 
-      /* ── Tagesübersicht Header ── */
-      .section-title-row {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        flex-wrap: wrap;
-        gap: 10px;
-        padding-bottom: 10px;
-        border-bottom: 1px solid var(--border);
-        margin-bottom: 0;
-      }
+    /* ── Tagesübersicht Header ── */
+    .section-title-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 10px;
+      padding-bottom: 10px;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 0;
+    }
 
-      .range-btns {
-        display: flex;
-        gap: 6px;
-      }
+    .range-btns {
+      display: flex;
+      gap: 6px;
+    }
 
-      .range-btn {
-        background: transparent;
-        border: 1px solid var(--border);
-        color: var(--muted);
-        font-family: var(--font-body);
-        font-size: 12px;
-        font-weight: 600;
-        padding: 5px 12px;
-        border-radius: 8px;
-        cursor: pointer;
-        transition: all 0.15s;
-      }
+    .range-btn {
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--muted);
+      font-family: var(--font-body);
+      font-size: 12px;
+      font-weight: 600;
+      padding: 5px 12px;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
 
-      .range-btn:hover {
-        border-color: rgba(255, 255, 255, 0.2);
-        color: var(--text);
-      }
+    .range-btn:hover {
+      border-color: rgba(255,255,255,0.2);
+      color: var(--text);
+    }
 
-      .range-btn.active {
-        background: var(--accent);
-        border-color: var(--accent);
-        color: #0d0f1a;
-      }
+    .range-btn.active {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #0d0f1a;
+    }
 
-      /* ── Login-Screen ── */
-      .login-screen {
-        position: fixed;
-        inset: 0;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        background: var(--bg);
-        z-index: 100;
-      }
+    /* ── Login-Screen ── */
+    .login-screen {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: var(--bg);
+      z-index: 100;
+    }
 
-      .login-card {
-        background: var(--surface);
-        border: 1px solid var(--border);
-        border-radius: 20px;
-        padding: 48px 40px;
-        text-align: center;
-        max-width: 380px;
-        width: 100%;
-      }
+    .login-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 48px 40px;
+      text-align: center;
+      max-width: 380px;
+      width: 100%;
+    }
 
-      .login-title {
-        font-family: var(--font-display);
-        font-size: 32px;
-        font-weight: 800;
-        line-height: 1.2;
-        margin-bottom: 12px;
-      }
+    .login-title {
+      font-family: var(--font-display);
+      font-size: 32px;
+      font-weight: 800;
+      line-height: 1.2;
+      margin-bottom: 12px;
+    }
 
-      .login-title em {
-        color: var(--accent);
-        font-style: normal;
-      }
-      .login-title span {
-        font-size: 16px;
-        color: var(--muted);
-        font-weight: 400;
-      }
+    .login-title em { color: var(--accent); font-style: normal; }
+    .login-title span { font-size: 16px; color: var(--muted); font-weight: 400; }
 
-      .login-sub {
-        font-size: 14px;
-        color: var(--muted);
-        margin-bottom: 32px;
-      }
+    .login-sub {
+      font-size: 14px;
+      color: var(--muted);
+      margin-bottom: 32px;
+    }
 
-      .btn-google {
-        display: inline-flex;
-        align-items: center;
-        gap: 10px;
-        background: #fff;
-        color: #333;
-        border: none;
-        border-radius: 10px;
-        padding: 12px 24px;
-        font-family: var(--font-body);
-        font-size: 15px;
-        font-weight: 600;
-        cursor: pointer;
-        transition:
-          opacity 0.2s,
-          transform 0.1s;
-      }
+    .btn-google {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      background: #fff;
+      color: #333;
+      border: none;
+      border-radius: 10px;
+      padding: 12px 24px;
+      font-family: var(--font-body);
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: opacity 0.2s, transform 0.1s;
+    }
 
-      .btn-google:hover {
-        opacity: 0.92;
-      }
-      .btn-google:active {
-        transform: scale(0.98);
-      }
+    .btn-google:hover   { opacity: 0.92; }
+    .btn-google:active  { transform: scale(0.98); }
 
-      .login-error {
-        margin-top: 16px;
-        font-size: 13px;
-        color: var(--accent2);
-        min-height: 20px;
-      }
-    </style>
-  </head>
-  <body>
-    <div class="header">
-      <h1 class="logo">One <em>Chance</em></h1>
-      <span class="header-sub"
-        ><span class="live-dot"></span>Live-Statistiken</span
-      >
-      <div
-        style="margin-left: auto; display: flex; align-items: center; gap: 12px"
-      >
-        <span
-          id="user-email"
-          style="font-size: 13px; color: var(--muted)"
-        ></span>
-        <button
-          id="btn-logout"
-          style="
-            font-size: 12px;
-            padding: 5px 12px;
-            background: transparent;
-            border: 1px solid rgba(255, 255, 255, 0.12);
-            color: var(--muted);
-            border-radius: 8px;
-            cursor: pointer;
-            font-family: var(--font-body);
-          "
-        >
-          Abmelden
-        </button>
+    .login-error {
+      margin-top: 16px;
+      font-size: 13px;
+      color: var(--accent2);
+      min-height: 20px;
+    }
+
+    /* ── Tagesfilter ── */
+    .section-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-bottom: 14px;
+      padding-bottom: 10px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .section-header .section-title {
+      margin-bottom: 0;
+      padding-bottom: 0;
+      border-bottom: none;
+    }
+
+    .filter-group {
+      display: flex;
+      gap: 6px;
+    }
+
+    .filter-btn {
+      font-family: var(--font-body);
+      font-size: 12px;
+      font-weight: 600;
+      padding: 5px 12px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+
+    .filter-btn:hover { color: var(--text); border-color: rgba(255,255,255,0.2); }
+
+    .filter-btn.active {
+      background: var(--surface2);
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+  </style>
+</head>
+<body>
+
+<div class="header">
+  <h1 class="logo">One <em>Chance</em></h1>
+  <span class="header-sub"><span class="live-dot"></span>Live-Statistiken</span>
+  <div style="margin-left:auto;display:flex;align-items:center;gap:12px">
+    <span id="user-email" style="font-size:13px;color:var(--muted)"></span>
+    <button id="btn-logout" style="font-size:12px;padding:5px 12px;background:transparent;border:1px solid rgba(255,255,255,0.12);color:var(--muted);border-radius:8px;cursor:pointer;font-family:var(--font-body)">Abmelden</button>
+  </div>
+</div>
+
+<!-- Login-Screen -->
+<div id="screen-login" class="login-screen">
+  <div class="login-card">
+    <h2 class="login-title">One <em>Chance</em><br/><span>Statistiken</span></h2>
+    <p class="login-sub">Nur für den Projektinhaber zugänglich.</p>
+    <button id="btn-google-login" class="btn-google">
+      <svg width="18" height="18" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
+      Mit Google anmelden
+    </button>
+    <p id="login-error" class="login-error"></p>
+  </div>
+</div>
+
+<div id="loading" class="loading" style="display:none">Daten werden geladen…</div>
+<div id="dashboard" style="display:none">
+
+  <!-- ── Gesamt-Karten ── -->
+  <div class="grid" id="grid-totals"></div>
+
+  <!-- ── Kategorien ── -->
+  <div class="section">
+    <div class="section-title">Gewählte Kategorien</div>
+    <table id="table-categories">
+      <thead><tr><th>Kategorie</th><th>Gespielt</th><th>Anteil</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+
+  <!-- ── Runden & Timing ── -->
+  <div class="section">
+    <div class="section-title">Runden &amp; Timing</div>
+    <div class="grid" id="grid-rounds" style="margin-bottom:0"></div>
+  </div>
+
+  <!-- ── Top Hinweiswörter ── -->
+  <div class="section">
+    <div class="section-title">Häufigste Hinweiswörter <span style="font-size:13px;color:var(--muted);font-weight:400">(Top 20)</span></div>
+    <table id="table-cluewords">
+      <thead><tr><th>Wort</th><th>Verwendet</th><th>Häufigkeit</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+
+  <!-- ── Wort-Trefferquote ── -->
+  <div class="section">
+    <div class="section-title">Wort-Trefferquote <span style="font-size:13px;color:var(--muted);font-weight:400">(min. 2× gespielt)</span></div>
+    <table id="table-words">
+      <thead><tr><th>Wort</th><th>Gespielt</th><th>Erraten</th><th>Trefferquote</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+
+  <!-- ── Tageszeit ── -->
+  <div class="section">
+    <div class="section-title">Aktivität nach Tageszeit</div>
+    <div id="chart-hourly" style="display:flex;align-items:flex-end;gap:4px;height:80px;padding:8px 0"></div>
+  </div>
+
+  <!-- ── Tagesübersicht ── -->
+  <div class="section">
+    <div class="section-title-row">
+      <div class="section-title" style="margin-bottom:0;border-bottom:none">Tagesübersicht</div>
+      <div class="range-btns">
+        <button class="range-btn active" data-days="14">14 Tage</button>
+        <button class="range-btn" data-days="30">30 Tage</button>
+        <button class="range-btn" data-days="90">90 Tage</button>
+        <button class="range-btn" data-days="0">Alle</button>
       </div>
     </div>
+    <table id="table-daily" style="margin-top:14px">
+      <thead><tr><th>Datum</th><th>Logins</th><th>Spiele</th><th>Gewonnen</th><th>Verloren</th><th>Winrate</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
 
-    <!-- Login-Screen -->
-    <div id="screen-login" class="login-screen">
-      <div class="login-card">
-        <h2 class="login-title">
-          One <em>Chance</em><br /><span>Statistiken</span>
-        </h2>
-        <p class="login-sub">Nur für den Projektinhaber zugänglich.</p>
-        <button id="btn-google-login" class="btn-google">
-          <svg width="18" height="18" viewBox="0 0 24 24">
-            <path
-              fill="#4285F4"
-              d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
-            />
-            <path
-              fill="#34A853"
-              d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
-            />
-            <path
-              fill="#FBBC05"
-              d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z"
-            />
-            <path
-              fill="#EA4335"
-              d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"
-            />
-          </svg>
-          Mit Google anmelden
-        </button>
-        <p id="login-error" class="login-error"></p>
-      </div>
-    </div>
+</div>
 
-    <div id="loading" class="loading" style="display: none">
-      Daten werden geladen…
-    </div>
-    <div id="dashboard" style="display: none">
-      <!-- ── Gesamt-Karten ── -->
-      <div class="grid" id="grid-totals"></div>
+<!-- Footer -->
+<div class="footer">
+  <a href="index.html">← Zurück zum Spiel</a>
+  <a href="https://github.com/poiscoding/" target="_blank" rel="noopener">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z"/></svg>
+    GitHub
+  </a>
+  <a href="https://buymeacoffee.com/poiscoding" target="_blank" rel="noopener">☕ Buy me a coffee</a>
+</div>
 
-      <!-- ── Kategorien ── -->
-      <div class="section">
-        <div class="section-title">Gewählte Kategorien</div>
-        <table id="table-categories">
-          <thead>
-            <tr>
-              <th>Kategorie</th>
-              <th>Gespielt</th>
-              <th>Anteil</th>
-            </tr>
-          </thead>
-          <tbody></tbody>
-        </table>
-      </div>
+<script>
+// ── Firebase Config ──
+const FIREBASE_CONFIG = {
+  apiKey:            "AIzaSyBwrDM4sBowMX5ozhllSZOmy0tItp0iFJM",
+  authDomain:        "one-chance-63038.firebaseapp.com",
+  databaseURL:       "https://one-chance-63038-default-rtdb.europe-west1.firebasedatabase.app",
+  projectId:         "one-chance-63038",
+  storageBucket:     "one-chance-63038.firebasestorage.app",
+  messagingSenderId: "19576021800",
+  appId:             "1:19576021800:web:dce22e95049af27362e61d",
+};
 
-      <!-- ── Tagesübersicht ── -->
-      <div class="section">
-        <div class="section-title-row">
-          <div
-            class="section-title"
-            style="margin-bottom: 0; border-bottom: none"
-          >
-            Tagesübersicht
-          </div>
-          <div class="range-btns">
-            <button class="range-btn active" data-days="14">14 Tage</button>
-            <button class="range-btn" data-days="30">30 Tage</button>
-            <button class="range-btn" data-days="90">90 Tage</button>
-            <button class="range-btn" data-days="0">Alle</button>
-          </div>
-        </div>
-        <table id="table-daily" style="margin-top: 14px">
-          <thead>
-            <tr>
-              <th>Datum</th>
-              <th>Logins</th>
-              <th>Spiele</th>
-              <th>Gewonnen</th>
-              <th>Verloren</th>
-              <th>Winrate</th>
-            </tr>
-          </thead>
-          <tbody></tbody>
-        </table>
-      </div>
-    </div>
+firebase.initializeApp(FIREBASE_CONFIG);
+const db     = firebase.database();
+const auth   = firebase.auth();
+const provider = new firebase.auth.GoogleAuthProvider();
 
-    <!-- Footer -->
-    <div class="footer">
-      <a href="index.html">← Zurück zum Spiel</a>
-      <a href="https://github.com/poiscoding/" target="_blank" rel="noopener">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-          <path
-            d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z"
-          />
-        </svg>
-        GitHub
-      </a>
-      <a
-        href="https://buymeacoffee.com/poiscoding"
-        target="_blank"
-        rel="noopener"
-        >☕ Buy me a coffee</a
-      >
-    </div>
+// ── Kategorie-Labels & Farben ──
+const CAT_LABELS  = { leicht: '😊 Leicht', mittel: '🤔 Mittel', schwer: '🧠 Schwer', fsk18: '🔞 FSK18' };
+const CAT_COLORS  = { leicht: '#64ffda', mittel: '#f5e642', schwer: '#ff6b6b', fsk18: '#b794f4' };
 
-    <script>
-      // ── Firebase Config ──
-      const FIREBASE_CONFIG = {
-        apiKey: "AIzaSyBwrDM4sBowMX5ozhllSZOmy0tItp0iFJM",
-        authDomain: "one-chance-63038.firebaseapp.com",
-        databaseURL:
-          "https://one-chance-63038-default-rtdb.europe-west1.firebasedatabase.app",
-        projectId: "one-chance-63038",
-        storageBucket: "one-chance-63038.firebasestorage.app",
-        messagingSenderId: "19576021800",
-        appId: "1:19576021800:web:dce22e95049af27362e61d",
-      };
+// ── Auth-State-Listener ──
+// Reagiert auf Login/Logout und zeigt den richtigen Screen
+auth.onAuthStateChanged(user => {
+  if (user) {
+    // Eingeloggt: Login-Screen ausblenden, Dashboard laden
+    document.getElementById('screen-login').style.display  = 'none';
+    document.getElementById('loading').style.display       = 'block';
+    document.getElementById('user-email').textContent      = user.email || user.displayName || '';
+    console.log('[Stats] Eingeloggt als:', user.uid, '– UID für Firebase-Regel:', user.uid);
+    loadDashboard();
+  } else {
+    // Ausgeloggt: Login-Screen zeigen, Dashboard ausblenden
+    document.getElementById('screen-login').style.display  = 'flex';
+    document.getElementById('loading').style.display       = 'none';
+    document.getElementById('dashboard').style.display     = 'none';
+  }
+});
 
-      firebase.initializeApp(FIREBASE_CONFIG);
-      const db = firebase.database();
-      const auth = firebase.auth();
-      const provider = new firebase.auth.GoogleAuthProvider();
+// ── Google Login ──
+document.getElementById('btn-google-login').addEventListener('click', () => {
+  const errEl = document.getElementById('login-error');
+  errEl.textContent = '';
+  auth.signInWithPopup(provider).catch(e => {
+    console.error('[Stats] Login-Fehler:', e);
+    errEl.textContent = 'Anmeldung fehlgeschlagen: ' + e.message;
+  });
+});
 
-      // ── Kategorie-Labels & Farben ──
-      const CAT_LABELS = {
-        leicht: "😊 Leicht",
-        mittel: "🤔 Mittel",
-        schwer: "🧠 Schwer",
-        fsk18: "🔞 FSK18",
-      };
-      const CAT_COLORS = {
-        leicht: "#64ffda",
-        mittel: "#f5e642",
-        schwer: "#ff6b6b",
-        fsk18: "#b794f4",
-      };
+// ── Logout ──
+document.getElementById('btn-logout').addEventListener('click', () => {
+  auth.signOut();
+});
 
-      // ── Auth-State-Listener ──
-      // Reagiert auf Login/Logout und zeigt den richtigen Screen
-      auth.onAuthStateChanged((user) => {
-        if (user) {
-          // Eingeloggt: Login-Screen ausblenden, Dashboard laden
-          document.getElementById("screen-login").style.display = "none";
-          document.getElementById("loading").style.display = "block";
-          document.getElementById("user-email").textContent =
-            user.email || user.displayName || "";
-          console.log(
-            "[Stats] Eingeloggt als:",
-            user.uid,
-            "– UID für Firebase-Regel:",
-            user.uid,
-          );
-          loadDashboard();
-        } else {
-          // Ausgeloggt: Login-Screen zeigen, Dashboard ausblenden
-          document.getElementById("screen-login").style.display = "flex";
-          document.getElementById("loading").style.display = "none";
-          document.getElementById("dashboard").style.display = "none";
-        }
-      });
+// ── Dashboard laden (nur nach erfolgreichem Login) ──
+function loadDashboard() {
+  db.ref('stats').on('value', snap => {
+    const data = snap.val() || {};
+    document.getElementById('loading').style.display   = 'none';
+    document.getElementById('dashboard').style.display = 'block';
+    renderTotals(data.totals || {});
+    renderCategories(data.categories || {});
+    renderRounds(data.totals || {});
+    renderClueWords(data.clueWords || {});
+    renderWords(data.words || {});
+    renderHourly(data.hourly || {});
+    renderDaily(data.daily || {});
+  }, err => {
+    // Kein Zugriff – falscher Account
+    document.getElementById('loading').innerHTML =
+      '<p style="color:var(--accent2)">⛔ Kein Zugriff. Bitte mit dem richtigen Google-Account anmelden.</p>';
+  });
+}
 
-      // ── Google Login ──
-      document
-        .getElementById("btn-google-login")
-        .addEventListener("click", () => {
-          const errEl = document.getElementById("login-error");
-          errEl.textContent = "";
-          auth.signInWithPopup(provider).catch((e) => {
-            console.error("[Stats] Login-Fehler:", e);
-            errEl.textContent = "Anmeldung fehlgeschlagen: " + e.message;
-          });
-        });
+function renderTotals(t) {
+  const gamesStarted = t.gamesStarted || 0;
+  const gamesWon     = t.gamesWon     || 0;
+  const gamesLost    = t.gamesLost    || 0;
+  const winrate      = gamesStarted > 0 ? Math.round(gamesWon / gamesStarted * 100) : 0;
+  const avgPlayers   = (t.playerCount || 0) > 0
+    ? (t.playerSum / t.playerCount).toFixed(1) : '—';
 
-      // ── Logout ──
-      document.getElementById("btn-logout").addEventListener("click", () => {
-        auth.signOut();
-      });
+  const cards = [
+    { label: 'Spiele gesamt',     value: gamesStarted, color: 'var(--accent)',  glow: 'rgba(245,230,66,0.06)' },
+    { label: 'Erfolgreich',       value: gamesWon,     color: 'var(--accent3)', glow: 'rgba(100,255,218,0.06)' },
+    { label: 'Nicht erfolgreich', value: gamesLost,    color: 'var(--accent2)', glow: 'rgba(255,107,107,0.06)' },
+    { label: 'Winrate',           value: winrate + '%',color: 'var(--accent4)', glow: 'rgba(183,148,244,0.06)', sub: 'aller gestarteten Runden' },
+    { label: 'Unique Users',      value: t.uniqueUsers || 0, color: 'var(--accent5)', glow: 'rgba(251,176,59,0.06)' },
+    { label: 'Logins gesamt',     value: t.logins || 0,      color: 'var(--muted)',   glow: 'rgba(255,255,255,0.03)' },
+    { label: 'Ø Spieler / Lobby', value: avgPlayers,   color: 'var(--accent3)', glow: 'rgba(100,255,218,0.06)', sub: 'aktive Spieler' },
+  ];
 
-      // ── Dashboard laden (nur nach erfolgreichem Login) ──
-      function loadDashboard() {
-        db.ref("stats").on(
-          "value",
-          (snap) => {
-            const data = snap.val() || {};
-            document.getElementById("loading").style.display = "none";
-            document.getElementById("dashboard").style.display = "block";
-            renderTotals(data.totals || {});
-            renderCategories(data.categories || {});
-            renderDaily(data.daily || {});
-          },
-          (err) => {
-            // Kein Zugriff – falscher Account
-            document.getElementById("loading").innerHTML =
-              '<p style="color:var(--accent2)">⛔ Kein Zugriff. Bitte mit dem richtigen Google-Account anmelden.</p>';
-          },
-        );
-      }
-
-      function renderTotals(t) {
-        const gamesStarted = t.gamesStarted || 0;
-        const gamesWon = t.gamesWon || 0;
-        const gamesLost = t.gamesLost || 0;
-        const winrate =
-          gamesStarted > 0 ? Math.round((gamesWon / gamesStarted) * 100) : 0;
-        const avgPlayers =
-          (t.playerCount || 0) > 0
-            ? (t.playerSum / t.playerCount).toFixed(1)
-            : "—";
-
-        const cards = [
-          {
-            label: "Spiele gesamt",
-            value: gamesStarted,
-            color: "var(--accent)",
-            glow: "rgba(245,230,66,0.06)",
-          },
-          {
-            label: "Erfolgreich",
-            value: gamesWon,
-            color: "var(--accent3)",
-            glow: "rgba(100,255,218,0.06)",
-          },
-          {
-            label: "Nicht erfolgreich",
-            value: gamesLost,
-            color: "var(--accent2)",
-            glow: "rgba(255,107,107,0.06)",
-          },
-          {
-            label: "Winrate",
-            value: winrate + "%",
-            color: "var(--accent4)",
-            glow: "rgba(183,148,244,0.06)",
-            sub: "aller gestarteten Runden",
-          },
-          {
-            label: "Unique Users",
-            value: t.uniqueUsers || 0,
-            color: "var(--accent5)",
-            glow: "rgba(251,176,59,0.06)",
-          },
-          {
-            label: "Logins gesamt",
-            value: t.logins || 0,
-            color: "var(--muted)",
-            glow: "rgba(255,255,255,0.03)",
-          },
-          {
-            label: "Ø Spieler / Lobby",
-            value: avgPlayers,
-            color: "var(--accent3)",
-            glow: "rgba(100,255,218,0.06)",
-            sub: "aktive Spieler",
-          },
-        ];
-
-        document.getElementById("grid-totals").innerHTML = cards
-          .map(
-            (c) => `
+  document.getElementById('grid-totals').innerHTML = cards.map(c => `
     <div class="stat-card" style="--card-color:${c.color};--card-glow:${c.glow}">
       <div class="stat-label">${c.label}</div>
       <div class="stat-value">${c.value}</div>
-      ${c.sub ? `<div class="stat-sub">${c.sub}</div>` : ""}
+      ${c.sub ? `<div class="stat-sub">${c.sub}</div>` : ''}
     </div>
-  `,
-          )
-          .join("");
-      }
+  `).join('');
+}
 
-      function renderCategories(cats) {
-        const total = Object.values(cats).reduce((s, v) => s + v, 0);
-        const order = ["leicht", "mittel", "schwer", "fsk18"];
-        const tbody = document.querySelector("#table-categories tbody");
+function renderCategories(cats) {
+  const total = Object.values(cats).reduce((s, v) => s + v, 0);
+  const order = ['leicht', 'mittel', 'schwer', 'fsk18'];
+  const tbody = document.querySelector('#table-categories tbody');
 
-        tbody.innerHTML = order
-          .map((key) => {
-            const count = cats[key] || 0;
-            const pct = total > 0 ? Math.round((count / total) * 100) : 0;
-            const color = CAT_COLORS[key] || "#888";
-            return `<tr>
+  tbody.innerHTML = order.map(key => {
+    const count = cats[key] || 0;
+    const pct   = total > 0 ? Math.round(count / total * 100) : 0;
+    const color = CAT_COLORS[key] || '#888';
+    return `<tr>
       <td>${CAT_LABELS[key] || key}</td>
       <td>${count}</td>
       <td>
@@ -740,42 +620,149 @@
         </div>
       </td>
     </tr>`;
-          })
-          .join("");
-      }
+  }).join('');
+}
 
-      // Aktuell gewählter Zeitraum (0 = alle)
-      let currentRange = 14;
-      // Alle Tagesdaten gecacht damit Range-Wechsel kein neues Firebase-Read braucht
-      let cachedDaily = {};
+function renderRounds(t) {
+  const avgValid   = (t.validClueCount || 0) > 0
+    ? (t.validClueSum / t.validClueCount).toFixed(1) : '—';
+  const avgDur     = (t.durationCount || 0) > 0
+    ? Math.round(t.durationSum / t.durationCount) : null;
+  const avgRounds  = (t.sessionCount || 0) > 0
+    ? (t.roundSum / t.sessionCount).toFixed(1) : '—';
+  const avgLifetime = (t.lobbyLifetimeCount || 0) > 0
+    ? Math.round(t.lobbyLifetimeSum / t.lobbyLifetimeCount / 60) : null;
 
-      function renderDaily(daily, range) {
-        cachedDaily = daily;
-        if (range !== undefined) currentRange = range;
+  const cards = [
+    { label: 'Ø gültige Hinweise',   value: avgValid,                              color: 'var(--accent3)', glow: 'rgba(100,255,218,0.06)', sub: 'pro Runde' },
+    { label: 'Ø Rundenzeit',         value: avgDur ? avgDur + 's' : '—',           color: 'var(--accent4)', glow: 'rgba(183,148,244,0.06)', sub: 'von Start bis Ergebnis' },
+    { label: 'Alle Hinw. gestrichen',value: t.allCluesStriken || 0,                color: 'var(--accent2)', glow: 'rgba(255,107,107,0.06)', sub: 'keine Chance für Rater' },
+    { label: 'Ø Runden / Session',   value: avgRounds,                             color: 'var(--accent)',  glow: 'rgba(245,230,66,0.06)',  sub: 'pro Lobby' },
+    { label: 'Ø Lobby-Lebensdauer',  value: avgLifetime ? avgLifetime + ' min' : '—', color: 'var(--accent5)', glow: 'rgba(251,176,59,0.06)', sub: 'von Erstellen bis Beenden' },
+    { label: 'Mit TV-Modus',         value: t.gamesWithTV  || 0,                   color: 'var(--accent2)', glow: 'rgba(229,62,62,0.06)',   sub: 'Runden' },
+    { label: 'Mit Moderator',        value: t.gamesWithMod || 0,                   color: 'var(--accent4)', glow: 'rgba(183,148,244,0.06)', sub: 'Runden' },
+  ];
 
-        let keys = Object.keys(cachedDaily).sort().reverse();
-        if (currentRange > 0) keys = keys.slice(0, currentRange);
+  document.getElementById('grid-rounds').innerHTML = cards.map(c => `
+    <div class="stat-card" style="--card-color:${c.color};--card-glow:${c.glow}">
+      <div class="stat-label">${c.label}</div>
+      <div class="stat-value">${c.value}</div>
+      ${c.sub ? `<div class="stat-sub">${c.sub}</div>` : ''}
+    </div>
+  `).join('');
+}
 
-        const tbody = document.querySelector("#table-daily tbody");
+function renderClueWords(words) {
+  const sorted = Object.entries(words)
+    .sort(([,a],[,b]) => b - a)
+    .slice(0, 20);
+  const max    = sorted[0]?.[1] || 1;
+  const tbody  = document.querySelector('#table-cluewords tbody');
 
-        if (keys.length === 0) {
-          tbody.innerHTML =
-            '<tr><td colspan="6" style="color:var(--muted);text-align:center;padding:20px">Noch keine Tagesdaten</td></tr>';
-          return;
-        }
+  if (sorted.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="3" style="color:var(--muted);text-align:center;padding:20px">Noch keine Daten</td></tr>';
+    return;
+  }
 
-        tbody.innerHTML = keys
-          .map((date) => {
-            const d = cachedDaily[date] || {};
-            const started = d.gamesStarted || 0;
-            const won = d.gamesWon || 0;
-            const lost = d.gamesLost || 0;
-            const winrate =
-              started > 0 ? Math.round((won / started) * 100) + "%" : "—";
-            const [year, month, day] = date.split("-");
-            const label = `${day}.${month}.${year}`;
+  tbody.innerHTML = sorted.map(([word, count]) => {
+    const pct   = Math.round(count / max * 100);
+    return `<tr>
+      <td style="font-weight:600">${word}</td>
+      <td>${count}×</td>
+      <td>
+        <div class="cat-bar-wrap">
+          <div class="cat-bar"><div class="cat-bar-fill" style="width:${pct}%;background:var(--accent4)"></div></div>
+          <span class="cat-count">${pct}%</span>
+        </div>
+      </td>
+    </tr>`;
+  }).join('');
+}
 
-            return `<tr>
+function renderWords(words) {
+  const sorted = Object.entries(words)
+    .filter(([, d]) => (d.played || 0) >= 2)
+    .map(([word, d]) => ({
+      word,
+      played: d.played || 0,
+      won:    d.won    || 0,
+      rate:   d.played > 0 ? Math.round(d.won / d.played * 100) : 0,
+    }))
+    .sort((a, b) => b.played - a.played);
+
+  const tbody = document.querySelector('#table-words tbody');
+
+  if (sorted.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="4" style="color:var(--muted);text-align:center;padding:20px">Noch keine Daten (min. 2× gespielt)</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = sorted.map(d => {
+    const color = d.rate >= 70 ? 'var(--accent3)' : d.rate >= 40 ? 'var(--accent)' : 'var(--accent2)';
+    return `<tr>
+      <td style="font-weight:600">${d.word}</td>
+      <td>${d.played}×</td>
+      <td>${d.won}×</td>
+      <td style="color:${color};font-weight:700">${d.rate}%</td>
+    </tr>`;
+  }).join('');
+}
+
+function renderHourly(hourly) {
+  const container = document.getElementById('chart-hourly');
+  const max = Math.max(...Array.from({length: 24}, (_, h) => hourly[h] || 0), 1);
+
+  container.innerHTML = Array.from({length: 24}, (_, h) => {
+    const val  = hourly[h] || 0;
+    const pct  = Math.round(val / max * 100);
+    const peak = pct > 70;
+    return `<div title="${h}:00 – ${val}×" style="
+      flex:1;
+      height:${Math.max(pct, 4)}%;
+      background:${peak ? 'var(--accent)' : 'var(--surface2)'};
+      border-radius:3px 3px 0 0;
+      border:1px solid ${peak ? 'rgba(245,230,66,0.3)' : 'var(--border)'};
+      cursor:default;
+      transition:background 0.2s;
+    "></div>`;
+  }).join('');
+
+  // Stunden-Labels darunter (nur jede 6. Stunde)
+  const labels = document.createElement('div');
+  labels.style.cssText = 'display:flex;justify-content:space-between;padding:4px 0;font-size:10px;color:var(--muted)';
+  labels.innerHTML = ['0h','6h','12h','18h','23h'].map(l => `<span>${l}</span>`).join('');
+  container.after(labels);
+}
+
+// Aktuell gewählter Zeitraum (0 = alle)
+let currentRange = 14;
+// Alle Tagesdaten gecacht damit Range-Wechsel kein neues Firebase-Read braucht
+let cachedDaily  = {};
+
+function renderDaily(daily, range) {
+  cachedDaily = daily;
+  if (range !== undefined) currentRange = range;
+
+  let keys = Object.keys(cachedDaily).sort().reverse();
+  if (currentRange > 0) keys = keys.slice(0, currentRange);
+
+  const tbody = document.querySelector('#table-daily tbody');
+
+  if (keys.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="6" style="color:var(--muted);text-align:center;padding:20px">Noch keine Tagesdaten</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = keys.map(date => {
+    const d       = cachedDaily[date] || {};
+    const started = d.gamesStarted || 0;
+    const won     = d.gamesWon     || 0;
+    const lost    = d.gamesLost    || 0;
+    const winrate = started > 0 ? Math.round(won / started * 100) + '%' : '—';
+    const [year, month, day] = date.split('-');
+    const label   = `${day}.${month}.${year}`;
+
+    return `<tr>
       <td>${label}</td>
       <td>${d.logins || 0}</td>
       <td>${started}</td>
@@ -783,20 +770,17 @@
       <td><span class="badge badge-lose">${lost}</span></td>
       <td>${winrate}</td>
     </tr>`;
-          })
-          .join("");
-      }
+  }).join('');
+}
 
-      // Range-Buttons
-      document.querySelectorAll(".range-btn").forEach((btn) => {
-        btn.addEventListener("click", () => {
-          document
-            .querySelectorAll(".range-btn")
-            .forEach((b) => b.classList.remove("active"));
-          btn.classList.add("active");
-          renderDaily(cachedDaily, parseInt(btn.dataset.days));
-        });
-      });
-    </script>
-  </body>
+// Range-Buttons
+document.querySelectorAll('.range-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.range-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    renderDaily(cachedDaily, parseInt(btn.dataset.days));
+  });
+});
+</script>
+</body>
 </html>
