@@ -5,6 +5,17 @@ Format: [Semantische Versionierung](https://semver.org/lang/de/) `vMAJOR.MINOR.P
 
 ---
 
+## [Hosting] – 2026-10-24
+
+### Hosting
+
+- Firebase Hosting für das bestehende Projekt `one-chance-63038` zusätzlich zu GitHub Pages eingerichtet.
+- Veröffentlichungsordner `public/` wird vor jedem Deploy ausschließlich aus den beiden HTML-Seiten und `assets/` erstellt.
+- HTML, CSS und JavaScript werden bei erneutem Aufruf auf Aktualität geprüft, damit Änderungen ohne veralteten Browser-Cache ankommen.
+- Hosting-Konfiguration und Anleitung zur erneuten Veröffentlichung ergänzt.
+
+---
+
 ## [v1.8.1] – 2026-03-15
 
 ### Neu

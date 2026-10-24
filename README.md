@@ -3,6 +3,7 @@
 > Das kooperative Multiplayer-Wort-Ratespiel für den Browser
 
 [![GitHub Pages](https://img.shields.io/badge/GitHub%20Pages-Live-brightgreen)](https://poiscoding.github.io/onechance/)
+[![Firebase Hosting](https://img.shields.io/badge/Firebase%20Hosting-Live-orange)](https://one-chance-63038.web.app/)
 [![Version](https://img.shields.io/badge/Version-1.8.1-blue)](#)
 [![Lizenz](https://img.shields.io/badge/Lizenz-Custom-lightgrey)](LICENSE)
 
@@ -22,7 +23,12 @@
 
 ```
 one-chance/
-├── index.html              ← Einstiegspunkt (einzige Datei im Root)
+├── index.html              ← Einstiegspunkt
+├── stats.html              ← Statistik-Dashboard mit Google-Login
+├── firebase.json           ← Firebase-Hosting-Konfiguration
+├── .firebaserc             ← Firebase-Projektzuordnung
+├── scripts/
+│   └── prepare-hosting.cjs  ← Erstellt den Veröffentlichungsordner public/
 ├── README.md               ← Diese Datei
 ├── CHANGELOG.md            ← Versionshistorie
 ├── .gitignore              ← Git-Ausnahmen
@@ -43,6 +49,35 @@ one-chance/
 | Firebase Realtime Database    | Echtzeit-Multiplayer-Synchronisierung |
 | Google Fonts (Syne + DM Sans) | Typografie                            |
 | GitHub Pages                  | Kostenloses statisches Hosting        |
+| Firebase Hosting              | Zusätzliches statisches Hosting mit HTTPS |
+
+---
+
+## 🌐 Firebase Hosting
+
+Das Spiel ist zusätzlich unter **https://one-chance-63038.web.app/** erreichbar.
+Die alternative Firebase-Adresse lautet **https://one-chance-63038.firebaseapp.com/**.
+GitHub Pages bleibt parallel bestehen. Beide Websites verwenden dasselbe bestehende
+Firebase-Projekt `one-chance-63038` und dieselbe Multiplayer-Datenbank.
+
+### Änderungen veröffentlichen
+
+Voraussetzung: Node.js mit npm und ein Google-Konto mit Hosting-Zugriff auf das Projekt.
+Im Projektordner ausführen:
+
+```powershell
+npx firebase-tools login
+npx firebase-tools deploy --only hosting --project one-chance-63038
+```
+
+Vor jeder Veröffentlichung erstellt `scripts/prepare-hosting.cjs` automatisch den
+Ordner `public/` neu. Er enthält ausschließlich `index.html`, `stats.html` und
+`assets/`. Lokale Notizen, `.history`, Git-Dateien und Konfigurationen werden nicht
+veröffentlicht. Der Befehl veröffentlicht ausschließlich Hosting; Datenbankregeln
+und andere Firebase-Dienste werden dabei nicht geändert.
+
+Ein Git-Push aktualisiert weiterhin GitHub Pages. Firebase wird mit dem obigen
+Deploy-Befehl separat aktualisiert.
 
 ---
 

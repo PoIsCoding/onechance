@@ -1,0 +1,19 @@
+{
+  "hosting": {
+    "site": "one-chance-63038",
+    "public": "public",
+    "predeploy": ["node scripts/prepare-hosting.cjs"],
+    "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
+    "headers": [
+      {
+        "source": "**/*.@(html|css|js)",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "public, max-age=0, must-revalidate"
+          }
+        ]
+      }
+    ]
+  }
+}

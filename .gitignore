@@ -29,3 +29,7 @@ package-lock.json
 firebase-config.local.json
 .env
 .env.local
+
+# Generierte Firebase-Hosting-Dateien und lokale CLI-Daten
+public/
+.firebase/
